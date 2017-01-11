@@ -15,16 +15,20 @@ use url::percent_encoding::{
 };
 
 struct EmitterRgx {
-    percent_to_url: regex::Regex
+    percent_rgx: regex::Regex
 }
 
 impl EmitterRgx {
     fn new() -> EmitterRgx {
-        let percent_to_url_rgx = Regex::new(r"%").unwrap();
+        let percent_rgx = Regex::new(r"%").unwrap();
 
         EmitterRgx {
-            percent_to_url: percent_to_url_rgx
+            percent_rgx: percent_rgx
         }
+    }
+
+    fn percent_to_url(&self, orig: &str) -> String {
+        self.percent_rgx.replace_all(orig, "%25").to_string()
     }
 }
 
@@ -83,8 +87,11 @@ impl Emitter {
         percent_encode(orig.as_bytes(), QUERY_ENCODE_SET).collect::<String>()
     }
 
+    // do an additional encode on top of urlencode
+    // as the url crate doesn't allow for double-encode
+    // as per ISO specification
     fn wrap_urlencode(&self, orig: &str) -> String {
-        return self.emitter_rgx.percent_to_url.replace_all(orig, "%25").to_string();
+        self.emitter_rgx.percent_to_url(orig)
     }
 
     fn cond_string(cond: bool, protagonist: &str, antagonist: &str) -> String {
@@ -186,6 +193,10 @@ impl Emitter {
             return self.handle_evt_log_newusers(evt);
         }
 
+        if log_type == "upload" {
+            return self.handle_evt_log_upload(evt);
+        }
+
         // not implemented
         if log_type != "null" {
             let msg = format!(
@@ -228,7 +239,21 @@ impl Emitter {
 
         let msg = format!(
             "[log/newusers] [{}] {} - https://psychonautwiki.org/wiki/{}",
-            user, comment, Emitter::urlencode(&user_page)
+            user, comment, self.wrap_urlencode(&Emitter::urlencode(&user_page))
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_upload(&self, evt: &json::JsonValue) {
+        let comment = evt["log_action_comment"].to_string();
+
+        let user = evt["user"].to_string();
+        let user_page = evt["title"].to_string();
+
+        let msg = format!(
+            "[log/upload] [{}] {} - https://psychonautwiki.org/wiki/{}",
+            user, comment, self.wrap_urlencode(&Emitter::urlencode(&user_page))
         );
 
         self.emit(msg);
@@ -254,7 +279,7 @@ impl Emitter {
 
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
-            Emitter::urlencode(&page), evt_curid, evt_previd
+            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid, evt_previd
         );
 
         let msg = format!(
