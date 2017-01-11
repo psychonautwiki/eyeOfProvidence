@@ -1,4 +1,4 @@
-FROM jimmycuadra/rust
+FROM kenansulayman/rust-nightly:latest
 
 ADD . /my-source
 
