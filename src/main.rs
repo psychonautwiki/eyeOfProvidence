@@ -55,6 +55,14 @@ impl Emitter {
         }
     }
 
+    fn explain_comment(comment: &str) -> String {
+        if comment == "" {
+            return format!("without summary");
+        }
+
+        return format!("with summary: {:?}", comment);
+    }
+
     fn handle_evt_edit(&self, evt: &json::JsonValue) {
         let user = evt["user"].to_string();
         let page = evt["title"].to_string();
@@ -73,15 +81,17 @@ impl Emitter {
         );
 
         let msg = format!(
-            "[edit] [{}]{}{}{} [{}] {:?} - {}",
+            "[edit] [{}]{}{}{} [{}] {} - {}",
             user,
 
             Emitter::cond_string(evt_is_minor, " [minor]", ""),
-            Emitter::cond_string(evt_is_patrolled, " [patrolled]", ""),
+            Emitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
             Emitter::cond_string(evt_is_bot, " [bot]", ""),
 
             page,
-            comment,
+
+            Emitter::explain_comment(&comment),
+
             url
         );
 
