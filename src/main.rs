@@ -4,17 +4,44 @@ use std::net::UdpSocket;
 extern crate hyper;
 extern crate telegram_bot;
 extern crate json;
+extern crate regex;
+
+extern crate url;
+
+use regex::Regex;
+
+use url::percent_encoding::{
+    percent_encode, QUERY_ENCODE_SET
+};
+
+struct EmitterRgx {
+    percent_to_url: regex::Regex
+}
+
+impl EmitterRgx {
+    fn new() -> EmitterRgx {
+        let percent_to_url_rgx = Regex::new(r"%").unwrap();
+
+        EmitterRgx {
+            percent_to_url: percent_to_url_rgx
+        }
+    }
+}
 
 struct Emitter {
-    api: telegram_bot::Api
+    api: telegram_bot::Api,
+    emitter_rgx: EmitterRgx
 }
 
 impl Emitter {
     fn new() -> Emitter {
         let api = telegram_bot::Api::from_env("TELEGRAM_TOKEN").unwrap();
 
+        let emitter_rgx = EmitterRgx::new();
+
         Emitter {
-            api: api
+            api: api,
+            emitter_rgx: emitter_rgx
         }
     }
 
@@ -52,6 +79,14 @@ impl Emitter {
         }
     }
 
+    fn urlencode(orig: &str) -> String {
+        percent_encode(orig.as_bytes(), QUERY_ENCODE_SET).collect::<String>()
+    }
+
+    fn wrap_urlencode(&self, orig: &str) -> String {
+        return self.emitter_rgx.percent_to_url.replace_all(orig, "%25").to_string();
+    }
+
     fn cond_string(cond: bool, protagonist: &str, antagonist: &str) -> String {
         match cond {
             true => protagonist.to_string(),
@@ -81,7 +116,7 @@ impl Emitter {
 
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
-            page, evt_curid, evt_previd
+            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid, evt_previd
         );
 
         let msg = format!(
@@ -115,7 +150,7 @@ impl Emitter {
 
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}%26oldid={:?}",
-            page, evt_curid
+            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid
         );
 
         let msg = format!(
@@ -126,11 +161,7 @@ impl Emitter {
             Emitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
             Emitter::cond_string(evt_is_bot, " [bot]", ""),
 
-            page,
-
-            Emitter::explain_comment(&comment),
-
-            url
+            page, comment, url
         );
 
         self.emit(msg);
@@ -158,7 +189,7 @@ impl Emitter {
         // not implemented
         if log_type != "null" {
             let msg = format!(
-                "[log] [not_implemented] {}",
+                "[log_not_implemented] {}",
                 evt.dump()
             );
 
@@ -170,7 +201,7 @@ impl Emitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "[log] [thanks] {:?}",
+            "[log/thanks] {:?}",
             comment
         );
 
@@ -182,7 +213,7 @@ impl Emitter {
         let user = evt["user"].to_string();
 
         let msg = format!(
-            "[log] [profile] [{}] {}",
+            "[log/profile] [{}] {}",
             user, comment
         );
 
@@ -196,8 +227,8 @@ impl Emitter {
         let user_page = evt["title"].to_string();
 
         let msg = format!(
-            "[log] [newusers] [{}] - https://psychonautwiki.org/wiki/{}",
-            user, comment, user_page
+            "[log/newusers] [{}] {} - https://psychonautwiki.org/wiki/{}",
+            user, comment, Emitter::urlencode(&user_page)
         );
 
         self.emit(msg);
@@ -223,11 +254,11 @@ impl Emitter {
 
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
-            page, evt_curid, evt_previd
+            Emitter::urlencode(&page), evt_curid, evt_previd
         );
 
         let msg = format!(
-            "[log] [patrol] [{}] {}- {}",
+            "[log/patrol] [{}] {}- {}",
             user, comment, url
         );
 

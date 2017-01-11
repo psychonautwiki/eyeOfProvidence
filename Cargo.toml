@@ -6,7 +6,9 @@ version = "0.1.0"
 [dependencies]
 hyper = "0.9.10"
 json = "0.10.2"
+regex = "0.2.1"
 telegram-bot = "0.4.2"
+url = "1.2.4"
 
 [profile]
 
