@@ -33,6 +33,10 @@ impl Emitter {
             return self.handle_evt_edit(evt);
         }
 
+        if evt_type == "new" {
+            return self.handle_evt_new(evt);
+        }
+
         if evt_type == "log" {
             return self.handle_evt_log(evt);
         }
@@ -82,6 +86,40 @@ impl Emitter {
 
         let msg = format!(
             "[edit] [{}]{}{}{} [{}] {} - {}",
+            user,
+
+            Emitter::cond_string(evt_is_minor, " [minor]", ""),
+            Emitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
+            Emitter::cond_string(evt_is_bot, " [bot]", ""),
+
+            page,
+
+            Emitter::explain_comment(&comment),
+
+            url
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_new(&self, evt: &json::JsonValue) {
+        let user = evt["user"].to_string();
+        let page = evt["title"].to_string();
+        let comment = evt["comment"].to_string();
+
+        let evt_curid = evt["revision"]["new"].as_u32().unwrap();
+
+        let evt_is_minor = evt["minor"].as_bool().unwrap();
+        let evt_is_patrolled = evt["patrolled"].as_bool().unwrap();
+        let evt_is_bot = evt["bot"].as_bool().unwrap();
+
+        let url = format!(
+            "https://psychonautwiki.org/w/index.php?title={}%26oldid={:?}",
+            page, evt_curid
+        );
+
+        let msg = format!(
+            "[created page] [{}]{}{}{} [{}] {} - {}",
             user,
 
             Emitter::cond_string(evt_is_minor, " [minor]", ""),
