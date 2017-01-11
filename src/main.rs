@@ -151,6 +151,10 @@ impl Emitter {
             return self.handle_evt_log_profile(evt);
         }
 
+        if log_type == "newusers" {
+            return self.handle_evt_log_newusers(evt);
+        }
+
         // not implemented
         if log_type != "null" {
             let msg = format!(
@@ -180,6 +184,20 @@ impl Emitter {
         let msg = format!(
             "[log] [profile] [{}] {}",
             user, comment
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_newusers(&self, evt: &json::JsonValue) {
+        let comment = evt["log_action_comment"].to_string();
+
+        let user = evt["user"].to_string();
+        let user_page = evt["title"].to_string();
+
+        let msg = format!(
+            "[log] [newusers] [{}] - https://psychonautwiki.org/wiki/{}",
+            user, comment, user_page
         );
 
         self.emit(msg);
