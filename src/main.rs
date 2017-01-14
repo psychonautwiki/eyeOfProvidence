@@ -177,8 +177,20 @@ impl Emitter {
     fn handle_evt_log(&self, evt: &json::JsonValue) {
         let log_type = evt["log_type"].to_string();
 
-        if log_type == "thanks" {
-            return self.handle_evt_log_thanks(evt);
+        if log_type == "avatar" {
+            return self.handle_evt_log_avatar(evt);
+        }
+
+        if log_type == "delete" {
+            return self.handle_evt_log_delete(evt);
+        }
+
+        if log_type == "move" {
+            return self.handle_evt_log_move(evt);
+        }
+
+        if log_type == "newusers" {
+            return self.handle_evt_log_newusers(evt);
         }
 
         if log_type == "patrol" {
@@ -189,8 +201,8 @@ impl Emitter {
             return self.handle_evt_log_profile(evt);
         }
 
-        if log_type == "newusers" {
-            return self.handle_evt_log_newusers(evt);
+        if log_type == "thanks" {
+            return self.handle_evt_log_thanks(evt);
         }
 
         if log_type == "upload" {
@@ -208,12 +220,81 @@ impl Emitter {
         }
     }
 
-    fn handle_evt_log_thanks(&self, evt: &json::JsonValue) {
-        let comment = evt["log_action_comment"].to_string();
+    fn handle_evt_log_avatar(&self, evt: &json::JsonValue) {
+        let user = evt["user"].to_string();
+        let page = evt["title"].to_string();
+        let comment = evt["comment"].to_string();
+
+        let url_page = self.wrap_urlencode(&Emitter::urlencode(&page));
 
         let msg = format!(
-            "[log/thanks] {:?}",
-            comment
+            "[log/avatar] [{}] {} - https://psychonautwiki.org/wiki/{}",
+
+            user, comment, url_page
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_delete(&self, evt: &json::JsonValue) {
+        let user = evt["user"].to_string();
+        let page = evt["title"].to_string();
+        let comment = evt["comment"].to_string();
+
+        let url_page = self.wrap_urlencode(&Emitter::urlencode(&page));
+
+        let msg = format!(
+            "[log/delete] [{}] deleted page: {:?} with comment: {:?} - https://psychonautwiki.org/wiki/{}",
+
+            user, page, comment, url_page
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_move(&self, evt: &json::JsonValue) {
+        let user = evt["user"].to_string();
+        let page = evt["title"].to_string();
+
+        let evt_target = evt["log_params"]["target"].to_string();
+
+        let url_page = self.wrap_urlencode(&Emitter::urlencode(&evt_target));
+
+        let msg = format!(
+            "[log/move] [{}] moved {:?} to {:?} - https://psychonautwiki.org/wiki/{}",
+
+            user, page, evt_target, url_page
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_patrol(&self, evt: &json::JsonValue) {
+        if !evt["log_params"]["auto"].is_number() {
+            return;
+        }
+
+        let evt_auto = evt["log_params"]["auto"].as_u32().unwrap();
+
+        if evt_auto == 1u32 {
+            return;
+        }
+
+        let evt_curid = evt["log_params"]["curid"].as_u32().unwrap();
+        let evt_previd = evt["log_params"]["previd"].as_u32().unwrap();
+
+        let user = evt["user"].to_string();
+        let page = evt["title"].to_string();
+        let comment = evt["log_action_comment"].to_string();
+
+        let url = format!(
+            "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
+            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid, evt_previd
+        );
+
+        let msg = format!(
+            "[log/patrol] [{}] {}- {}",
+            user, comment, url
         );
 
         self.emit(msg);
@@ -251,40 +332,22 @@ impl Emitter {
         let user = evt["user"].to_string();
         let user_page = evt["title"].to_string();
 
+        let url_page = self.wrap_urlencode(&Emitter::urlencode(&user_page));
+
         let msg = format!(
-            "[log/upload] [{}] {} - https://psychonautwiki.org/wiki/{}",
-            user, comment, self.wrap_urlencode(&Emitter::urlencode(&user_page))
+            "[log/upload] [{}] uploaded file: {:?} - https://psychonautwiki.org/wiki/{}",
+            user, user_page, url_page
         );
 
         self.emit(msg);
     }
 
-    fn handle_evt_log_patrol(&self, evt: &json::JsonValue) {
-        if !evt["log_params"]["auto"].is_number() {
-            return;
-        }
-
-        let evt_auto = evt["log_params"]["auto"].as_u32().unwrap();
-
-        if evt_auto == 1u32 {
-            return;
-        }
-
-        let evt_curid = evt["log_params"]["curid"].as_u32().unwrap();
-        let evt_previd = evt["log_params"]["previd"].as_u32().unwrap();
-
-        let user = evt["user"].to_string();
-        let page = evt["title"].to_string();
+    fn handle_evt_log_thanks(&self, evt: &json::JsonValue) {
         let comment = evt["log_action_comment"].to_string();
 
-        let url = format!(
-            "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
-            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid, evt_previd
-        );
-
         let msg = format!(
-            "[log/patrol] [{}] {}- {}",
-            user, comment, url
+            "[log/thanks] {:?}",
+            comment
         );
 
         self.emit(msg);
