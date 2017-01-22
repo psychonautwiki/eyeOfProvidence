@@ -181,6 +181,10 @@ impl Emitter {
             return self.handle_evt_log_avatar(evt);
         }
 
+        if log_type == "block" {
+            return self.handle_evt_log_block(evt);
+        }
+
         if log_type == "delete" {
             return self.handle_evt_log_delete(evt);
         }
@@ -231,6 +235,19 @@ impl Emitter {
             "[log/avatar] [{}] {} - https://psychonautwiki.org/wiki/{}",
 
             user, comment, url_page
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_block(&self, evt: &json::JsonValue) {
+        let user = evt["user"].to_string();
+        let comment = evt["log_action_comment"].to_string();
+
+        let msg = format!(
+            "[log/ban] [{}] {}",
+
+            user, comment
         );
 
         self.emit(msg);
