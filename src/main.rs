@@ -15,20 +15,39 @@ use url::percent_encoding::{
 };
 
 struct EmitterRgx {
-    percent_rgx: regex::Regex
+    percent_rgx: regex::Regex,
+    plus_rgx: regex::Regex,
+    and_rgx: regex::Regex,
+    questionmark_rgx: regex::Regex,
+    backslash_rgx: regex::Regex
 }
 
 impl EmitterRgx {
     fn new() -> EmitterRgx {
         let percent_rgx = Regex::new(r"%").unwrap();
+        let plus_rgx = Regex::new(r"\+").unwrap();
+        let and_rgx = Regex::new(r"\&").unwrap();
+        let questionmark_rgx = Regex::new(r"\?").unwrap();
+        let backslash_rgx = Regex::new(r"\\").unwrap();
 
         EmitterRgx {
-            percent_rgx: percent_rgx
+            percent_rgx: percent_rgx,
+            plus_rgx: plus_rgx,
+            and_rgx: and_rgx,
+            questionmark_rgx: questionmark_rgx,
+            backslash_rgx: backslash_rgx
         }
     }
 
     fn percent_to_url(&self, orig: &str) -> String {
         self.percent_rgx.replace_all(orig, "%25").to_string()
+    }
+
+    fn plusexclquest_to_url(&self, orig: &str) -> String {
+        let orig_pr = self.plus_rgx.replace_all(orig, "%2b").to_string();
+        let orig_ar = self.and_rgx.replace_all(&orig_pr, "%26").to_string();
+
+        self.questionmark_rgx.replace_all(&orig_ar, "%3f").to_string()
     }
 }
 
@@ -205,6 +224,10 @@ impl Emitter {
             return self.handle_evt_log_profile(evt);
         }
 
+        if log_type == "rights" {
+            return self.handle_evt_log_rights(evt);
+        }
+
         if log_type == "thanks" {
             return self.handle_evt_log_thanks(evt);
         }
@@ -217,7 +240,7 @@ impl Emitter {
         if log_type != "null" {
             let msg = format!(
                 "[log_not_implemented] {}",
-                evt.dump()
+                self.emitter_rgx.plusexclquest_to_url(&evt.dump())
             );
 
             self.emit(msg);
@@ -234,7 +257,9 @@ impl Emitter {
         let msg = format!(
             "[log/avatar] [{}] {} - https://psychonautwiki.org/wiki/{}",
 
-            user, comment, url_page
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&comment),
+            url_page
         );
 
         self.emit(msg);
@@ -247,7 +272,8 @@ impl Emitter {
         let msg = format!(
             "[log/ban] [{}] {}",
 
-            user, comment
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&comment)
         );
 
         self.emit(msg);
@@ -263,7 +289,10 @@ impl Emitter {
         let msg = format!(
             "[log/delete] [{}] deleted page: {:?} with comment: {:?} - https://psychonautwiki.org/wiki/{}",
 
-            user, page, comment, url_page
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&page),
+            self.emitter_rgx.plusexclquest_to_url(&comment),
+            url_page
         );
 
         self.emit(msg);
@@ -280,7 +309,27 @@ impl Emitter {
         let msg = format!(
             "[log/move] [{}] moved {:?} to {:?} - https://psychonautwiki.org/wiki/{}",
 
-            user, page, evt_target, url_page
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&page),
+            self.emitter_rgx.plusexclquest_to_url(&evt_target),
+            self.emitter_rgx.plusexclquest_to_url(&url_page)
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_newusers(&self, evt: &json::JsonValue) {
+        let comment = evt["log_action_comment"].to_string();
+
+        let user = evt["user"].to_string();
+        let user_page = evt["title"].to_string();
+
+        let msg = format!(
+            "[log/newusers] [{}] {} - https://psychonautwiki.org/wiki/{}",
+
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&comment),
+            self.emitter_rgx.plusexclquest_to_url(&user_page)
         );
 
         self.emit(msg);
@@ -311,7 +360,10 @@ impl Emitter {
 
         let msg = format!(
             "[log/patrol] [{}] {}- {}",
-            user, comment, url
+
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&comment),
+            url
         );
 
         self.emit(msg);
@@ -323,21 +375,34 @@ impl Emitter {
 
         let msg = format!(
             "[log/profile] [{}] {}",
-            user, comment
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&comment)
         );
 
         self.emit(msg);
     }
 
-    fn handle_evt_log_newusers(&self, evt: &json::JsonValue) {
+    fn handle_evt_log_rights(&self, evt: &json::JsonValue) {
+        let user = evt["user"].to_string();
         let comment = evt["log_action_comment"].to_string();
 
-        let user = evt["user"].to_string();
-        let user_page = evt["title"].to_string();
+        let msg = format!(
+            "[log/rights] [{}] {}",
+
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&comment)
+        );
+
+        self.emit(msg);
+    }
+
+    fn handle_evt_log_thanks(&self, evt: &json::JsonValue) {
+        let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "[log/newusers] [{}] {} - https://psychonautwiki.org/wiki/{}",
-            user, comment, self.wrap_urlencode(&Emitter::urlencode(&user_page))
+            "[log/thanks] {:?}",
+
+            self.emitter_rgx.plusexclquest_to_url(&comment)
         );
 
         self.emit(msg);
@@ -353,18 +418,10 @@ impl Emitter {
 
         let msg = format!(
             "[log/upload] [{}] uploaded file: {:?} - https://psychonautwiki.org/wiki/{}",
-            user, user_page, url_page
-        );
 
-        self.emit(msg);
-    }
-
-    fn handle_evt_log_thanks(&self, evt: &json::JsonValue) {
-        let comment = evt["log_action_comment"].to_string();
-
-        let msg = format!(
-            "[log/thanks] {:?}",
-            comment
+            self.emitter_rgx.plusexclquest_to_url(&user),
+            self.emitter_rgx.plusexclquest_to_url(&user_page),
+            url_page
         );
 
         self.emit(msg);
