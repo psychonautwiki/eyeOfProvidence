@@ -1,25 +1,39 @@
 use std::str;
 use std::net::UdpSocket;
 
-extern crate hyper;
 extern crate telegram_bot;
 extern crate json;
-extern crate regex;
+
+extern crate afterparty;
+use afterparty::{Delivery, Hub};
+
+extern crate hyper;
+use hyper::Server;
 
 extern crate url;
-
-use regex::Regex;
-
 use url::percent_encoding::{
     percent_encode, QUERY_ENCODE_SET
 };
+
+extern crate regex;
+use regex::Regex;
+
+use std::sync::{Arc, Mutex};
+
+extern crate scoped_threadpool;
+use scoped_threadpool::Pool;
+
+extern crate urlshortener;
+use urlshortener::{Provider, UrlShortener};
+
+const MEDIAWIKI_ENDPOINT: &'static str = "0.0.0.0:3000";
+const GITHUB_ENDPOINT: &'static str = "0.0.0.0:4567";
 
 struct EmitterRgx {
     percent_rgx: regex::Regex,
     plus_rgx: regex::Regex,
     and_rgx: regex::Regex,
-    questionmark_rgx: regex::Regex,
-    backslash_rgx: regex::Regex
+    questionmark_rgx: regex::Regex
 }
 
 impl EmitterRgx {
@@ -28,14 +42,12 @@ impl EmitterRgx {
         let plus_rgx = Regex::new(r"\+").unwrap();
         let and_rgx = Regex::new(r"\&").unwrap();
         let questionmark_rgx = Regex::new(r"\?").unwrap();
-        let backslash_rgx = Regex::new(r"\\").unwrap();
 
         EmitterRgx {
             percent_rgx: percent_rgx,
             plus_rgx: plus_rgx,
             and_rgx: and_rgx,
-            questionmark_rgx: questionmark_rgx,
-            backslash_rgx: backslash_rgx
+            questionmark_rgx: questionmark_rgx
         }
     }
 
@@ -51,29 +63,75 @@ impl EmitterRgx {
     }
 }
 
-struct Emitter {
+struct ConfiguredApi {
     api: telegram_bot::Api,
-    emitter_rgx: EmitterRgx
+    channel_id: i64,
+    name: String,
+    parse_mode: Option<telegram_bot::types::ParseMode>,
+    url_shortener: UrlShortener
 }
 
-impl Emitter {
-    fn new() -> Emitter {
+impl ConfiguredApi {
+    fn new(name: &str, parse_mode: Option<telegram_bot::types::ParseMode>) -> ConfiguredApi {
         let api = telegram_bot::Api::from_env("TELEGRAM_TOKEN").unwrap();
 
-        let emitter_rgx = EmitterRgx::new();
+        let url_shortener = UrlShortener::new();
 
-        Emitter {
+        ConfiguredApi {
             api: api,
-            emitter_rgx: emitter_rgx
+            url_shortener: url_shortener,
+
+            channel_id: -1001050593583,
+            name: name.to_string(),
+            parse_mode: parse_mode
+        }
+    }
+
+    fn get_short_url (&self, long_url: &str) -> String {
+        match self.url_shortener.generate(long_url.to_string(), &Provider::IsGd) {
+            Ok(short_url) => short_url,
+            Err(_) => long_url.to_string()
         }
     }
 
     fn emit(&self, msg: String) {
         let _ = self.api.send_message(
-            -1001050593583 as i64,
-            msg,
-            None, None, None, None
+            /*chat_id*/
+            self.channel_id,
+
+            /*text*/
+            format!("⥂ {} ⟹ {}", self.name, msg),
+
+            /*parse_mode*/
+            self.parse_mode,
+
+            /*disable_web_page_preview*/
+            Some(true),
+
+            /*reply_to_message_id*/
+            None,
+
+            /*reply_markup*/
+            None
         );
+    }
+}
+
+struct MediaWikiEmitter {
+    configured_api: ConfiguredApi,
+    emitter_rgx: EmitterRgx
+}
+
+impl MediaWikiEmitter {
+    fn new() -> MediaWikiEmitter {
+        let configured_api = ConfiguredApi::new(&"MediaWiki", None);
+
+        let emitter_rgx = EmitterRgx::new();
+
+        MediaWikiEmitter {
+            configured_api: configured_api,
+            emitter_rgx: emitter_rgx
+        }
     }
 
     fn handle_evt(&self, evt: &json::JsonValue) {
@@ -98,7 +156,7 @@ impl Emitter {
                 evt.dump()
             );
 
-            self.emit(msg);
+            self.configured_api.emit(msg);
         }
     }
 
@@ -142,25 +200,25 @@ impl Emitter {
 
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
-            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid, evt_previd
+            self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_curid, evt_previd
         );
 
         let msg = format!(
             "[edit] [{}]{}{}{} [{}] {} - {}",
             user,
 
-            Emitter::cond_string(evt_is_minor, " [minor]", ""),
-            Emitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
-            Emitter::cond_string(evt_is_bot, " [bot]", ""),
+            MediaWikiEmitter::cond_string(evt_is_minor, " [minor]", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, " [bot]", ""),
 
             page,
 
-            Emitter::explain_comment(&comment),
+            MediaWikiEmitter::explain_comment(&comment),
 
             url
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_new(&self, evt: &json::JsonValue) {
@@ -176,21 +234,21 @@ impl Emitter {
 
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}%26oldid={:?}",
-            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid
+            self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_curid
         );
 
         let msg = format!(
             "[created page] [{}]{}{}{} [{}] {} - {}",
             user,
 
-            Emitter::cond_string(evt_is_minor, " [minor]", ""),
-            Emitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
-            Emitter::cond_string(evt_is_bot, " [bot]", ""),
+            MediaWikiEmitter::cond_string(evt_is_minor, " [minor]", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, " [bot]", ""),
 
             page, comment, url
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log(&self, evt: &json::JsonValue) {
@@ -243,7 +301,7 @@ impl Emitter {
                 self.emitter_rgx.plusexclquest_to_url(&evt.dump())
             );
 
-            self.emit(msg);
+            self.configured_api.emit(msg);
         }
     }
 
@@ -252,7 +310,7 @@ impl Emitter {
         let page = evt["title"].to_string();
         let comment = evt["comment"].to_string();
 
-        let url_page = self.wrap_urlencode(&Emitter::urlencode(&page));
+        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page));
 
         let msg = format!(
             "[log/avatar] [{}] {} - https://psychonautwiki.org/wiki/{}",
@@ -262,7 +320,7 @@ impl Emitter {
             url_page
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_block(&self, evt: &json::JsonValue) {
@@ -276,7 +334,7 @@ impl Emitter {
             self.emitter_rgx.plusexclquest_to_url(&comment)
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_delete(&self, evt: &json::JsonValue) {
@@ -284,7 +342,7 @@ impl Emitter {
         let page = evt["title"].to_string();
         let comment = evt["comment"].to_string();
 
-        let url_page = self.wrap_urlencode(&Emitter::urlencode(&page));
+        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page));
 
         let msg = format!(
             "[log/delete] [{}] deleted page: {:?} with comment: {:?} - https://psychonautwiki.org/wiki/{}",
@@ -295,7 +353,7 @@ impl Emitter {
             url_page
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_move(&self, evt: &json::JsonValue) {
@@ -304,7 +362,7 @@ impl Emitter {
 
         let evt_target = evt["log_params"]["target"].to_string();
 
-        let url_page = self.wrap_urlencode(&Emitter::urlencode(&evt_target));
+        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&evt_target));
 
         let msg = format!(
             "[log/move] [{}] moved {:?} to {:?} - https://psychonautwiki.org/wiki/{}",
@@ -315,7 +373,7 @@ impl Emitter {
             self.emitter_rgx.plusexclquest_to_url(&url_page)
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_newusers(&self, evt: &json::JsonValue) {
@@ -332,7 +390,7 @@ impl Emitter {
             self.emitter_rgx.plusexclquest_to_url(&user_page)
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_patrol(&self, evt: &json::JsonValue) {
@@ -355,7 +413,7 @@ impl Emitter {
 
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
-            self.wrap_urlencode(&Emitter::urlencode(&page)), evt_curid, evt_previd
+            self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_curid, evt_previd
         );
 
         let msg = format!(
@@ -366,7 +424,7 @@ impl Emitter {
             url
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_profile(&self, evt: &json::JsonValue) {
@@ -379,7 +437,7 @@ impl Emitter {
             self.emitter_rgx.plusexclquest_to_url(&comment)
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_rights(&self, evt: &json::JsonValue) {
@@ -393,7 +451,7 @@ impl Emitter {
             self.emitter_rgx.plusexclquest_to_url(&comment)
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_thanks(&self, evt: &json::JsonValue) {
@@ -405,16 +463,14 @@ impl Emitter {
             self.emitter_rgx.plusexclquest_to_url(&comment)
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
     }
 
     fn handle_evt_log_upload(&self, evt: &json::JsonValue) {
-        let comment = evt["log_action_comment"].to_string();
-
         let user = evt["user"].to_string();
         let user_page = evt["title"].to_string();
 
-        let url_page = self.wrap_urlencode(&Emitter::urlencode(&user_page));
+        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&user_page));
 
         let msg = format!(
             "[log/upload] [{}] uploaded file: {:?} - https://psychonautwiki.org/wiki/{}",
@@ -424,39 +480,280 @@ impl Emitter {
             url_page
         );
 
-        self.emit(msg);
+        self.configured_api.emit(msg);
+    }
+}
+
+struct GithubEmitter {
+    configured_api: ConfiguredApi
+}
+
+impl GithubEmitter {
+    fn new() -> GithubEmitter {
+        let configured_api = ConfiguredApi::new(&"*GitHub*", Some(telegram_bot::types::ParseMode::Markdown));
+
+        GithubEmitter {
+            configured_api: configured_api
+        }
+    }
+
+    fn handle_evt (&self, delivery: &Delivery) {
+        match delivery.payload {
+            afterparty::Event::Watch { ref sender, ref repository, .. } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) started watching [{}]({})",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    repository.full_name,
+                    self.configured_api.get_short_url(&repository.html_url)
+                ));
+            },
+            afterparty::Event::CommitComment { ref sender, ref comment, ref repository, .. } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) created a comment on [{}]({})",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    format!(
+                        "{}/{}:{}",
+
+                        repository.full_name,
+                        comment.path.clone().unwrap_or("".to_string()),
+                        comment.line.clone().unwrap_or("".to_string())
+                    ),
+
+                    self.configured_api.get_short_url(&comment.html_url)
+                ));
+            },
+            afterparty::Event::Fork { ref sender, ref repository, ref forkee } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) forked [{}]({}) as [{}]({})",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    repository.full_name,
+                    self.configured_api.get_short_url(&repository.html_url),
+
+                    forkee.full_name,
+                    self.configured_api.get_short_url(&forkee.html_url),
+                ));
+            },
+            afterparty::Event::IssueComment { ref sender, ref action, ref comment, ref issue, ref repository } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) {} a comment on issue [{}]({}) ({:?})",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    action,
+
+                    format!("{}#{}", repository.full_name, issue.number),
+
+                    {
+                        if action == "deleted" {
+                            self.configured_api.get_short_url(&issue.html_url)
+                        } else {
+                            self.configured_api.get_short_url(&comment.html_url)
+                        }
+                    },
+
+                    issue.title
+                ));
+            },
+            afterparty::Event::Issues { ref sender, ref action, ref issue, ref repository } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) {} issue [{}]({}) ({:?})",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    action,
+
+                    format!("{}#{}", repository.full_name, issue.number),
+                    self.configured_api.get_short_url(&issue.html_url),
+
+                    issue.title
+                ));
+            },
+            afterparty::Event::Member { ref sender, ref action, ref member, ref repository } => {
+                let mut perm_verb = "";
+                let mut perm_suffix = "";
+
+                if action == "edited" {
+                    perm_verb = "edited the permissions of";
+                    perm_suffix = "in";
+                } else if action == "added" {
+                    perm_verb = "added";
+                    perm_suffix = "to";
+                } else if action == "deleted" {
+                    perm_verb = "removed";
+                    perm_suffix = "from";
+                }
+
+                self.configured_api.emit(format!(
+                    "[{}]({}) {} [{}]({}) {} [{}]({})",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    perm_verb,
+
+                    member.login,
+                    self.configured_api.get_short_url(&member.html_url),
+
+                    perm_suffix,
+
+                    repository.full_name,
+                    self.configured_api.get_short_url(&repository.html_url),
+                ));
+            },
+            afterparty::Event::Membership { ref sender, ref action, ref member, ref team, ref organization, .. } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) was {} [{}/{}]({}) by [{}]({})",
+
+                    member.login,
+                    self.configured_api.get_short_url(&member.html_url),
+
+                    {
+                        if action == "added" {
+                            "added to"
+                        } else {
+                            "removed from"
+                        }
+                    },
+
+                    organization.login,
+
+                    team.name,
+                    self.configured_api.get_short_url(&team.members_url),
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url)
+                ));
+            },
+            afterparty::Event::Push { ref sender, ref commits, ref compare, ref _ref, ref head_commit, ref repository, .. } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) pushed [{} commit{}]({}) to [{}]({}) ([{}]({}))",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    commits.len(),
+                    { if commits.len() == 1 { "" } else { "s" } },
+                    self.configured_api.get_short_url(&compare),
+
+                    repository.full_name,
+                    self.configured_api.get_short_url(&repository.html_url),
+
+                    _ref,
+                    self.configured_api.get_short_url(&head_commit.url)
+                ));
+            },
+            afterparty::Event::Repository { ref sender, ref action, ref repository, .. } => {
+                self.configured_api.emit(format!(
+                    "[{}]({}) {} repository [{}]({})",
+
+                    sender.login,
+                    self.configured_api.get_short_url(&sender.html_url),
+
+                    action,
+
+                    repository.full_name,
+                    self.configured_api.get_short_url(&repository.html_url)
+                ));
+            },
+            _ => (),
+        }
+    }
+}
+
+struct EoP {
+    thread_pool: scoped_threadpool::Pool
+}
+
+impl EoP {
+    fn new() -> EoP {
+        EoP {
+            thread_pool: Pool::new(2)
+        }
+    }
+
+    fn init (&mut self) {
+        self.thread_pool.scoped(|scoped| {
+            scoped.execute(|| {
+                EoP::init_mediawiki();
+            });
+
+            scoped.execute(|| {
+               EoP::init_github();
+            });
+        });
+    }
+
+    fn init_mediawiki () {
+        let emitter = MediaWikiEmitter::new();
+
+        let socket = match UdpSocket::bind(MEDIAWIKI_ENDPOINT) {
+            Ok(socket) => {
+                println!("✔ MediaWikiEmitter online. ({})", MEDIAWIKI_ENDPOINT);
+
+                socket
+            },
+            Err(e) => panic!("✘ MediaWikiEmitter failed to create socket: {}", e)
+        };
+
+        let mut buf = [0; 2048];
+        loop {
+            match socket.recv_from(&mut buf) {
+                Ok((amt, _)) => {
+                    let instr = str::from_utf8(&buf[0..amt]).unwrap_or("");
+
+                    let evt = json::parse(instr);
+
+                    if !evt.is_ok() {
+                        continue;
+                    }
+
+                    let ref evt = evt.unwrap();
+
+                    emitter.handle_evt(evt);
+                },
+                Err(e) => println!("couldn't recieve a datagram: {}", e)
+            }
+        }
+    }
+
+    fn init_github () {
+        let mut hub = Hub::new();
+
+        let ge = Arc::new(Mutex::new(GithubEmitter::new()));
+        let gex = ge.clone();
+
+        hub.handle_authenticated("*", "8ud0TINnO5V/wFjEzU+kwRkYQhwr7ddX7kUM+MC9pEM=", move |delivery: &Delivery| {
+            gex.lock().unwrap().handle_evt(delivery);
+        });
+
+        let srvc = match Server::http(GITHUB_ENDPOINT) {
+            Ok(server) => {
+                println!("✔ GithubEmitter online. ({})", GITHUB_ENDPOINT);
+
+                server
+            },
+            Err(e) => panic!("✘ GithubEmitter failed to create socket: {}", e)
+        };
+
+        let _ = srvc.handle(hub);
     }
 }
 
 fn main() {
-    println!("~~~~~~ 6EQUJ5 ~~~~~~");
+    println!("~~~~~~ PsychonautWiki EoP ~~~~~~");
 
-    let emitter = Emitter::new();
+    let mut eye = EoP::new();
 
-    let socket = match UdpSocket::bind("0.0.0.0:3000") {
-        Ok(s) => s,
-        Err(e) => panic!("couldn't bind socket: {}", e)
-    };
-
-    let mut buf = [0; 2048];
-    loop {
-        match socket.recv_from(&mut buf) {
-            Ok((amt, _)) => {
-                let instr = str::from_utf8(&buf[0..amt]).unwrap_or("");
-
-                let evt = json::parse(instr);
-
-                if !evt.is_ok() {
-                    continue;
-                }
-
-                let ref evt = evt.unwrap();
-
-                emitter.handle_evt(evt);
-            },
-            Err(e) => {
-                println!("couldn't recieve a datagram: {}", e);
-            }
-        }
-    }
+    eye.init();
 }
