@@ -5,4 +5,4 @@ ADD . /my-source
 RUN cd /my-source && cargo build -v
 #--release
 
-CMD ["/my-source/target/release/eye_of_providence"]
+CMD ["/my-source/target/debug/eye_of_providence"]
