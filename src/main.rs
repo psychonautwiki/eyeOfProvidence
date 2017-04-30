@@ -203,7 +203,7 @@ impl MediaWikiEmitter {
             return format!("without summary");
         }
 
-        return format!("with summary: {:?}", comment);
+        return format!("with summary: {}", comment);
     }
 
     fn handle_evt_edit(&self, evt: &json::JsonValue) {
@@ -226,9 +226,9 @@ impl MediaWikiEmitter {
         let msg = format!(
             "{}{}{}[{}]({}) edited [{}]({}) {}",
 
-            MediaWikiEmitter::cond_string(evt_is_minor, "`[`minor`]` ", ""),
-            MediaWikiEmitter::cond_string(evt_is_patrolled, " `[`auto_patrolled`]` ", ""),
-            MediaWikiEmitter::cond_string(evt_is_bot, " `[`bot`]` ", ""),
+            MediaWikiEmitter::cond_string(evt_is_minor, "•minor• ", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, " •auto_patrolled• ", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, " •bot• ", ""),
 
             user,
             self.get_user_url(&user),
@@ -259,11 +259,11 @@ impl MediaWikiEmitter {
         );
 
         let msg = format!(
-            "`[`new`]` {}{}{}[{}]({}) created page [{}]({}) {}",
+            "•**new**• {}{}{}[{}]({}) created page [{}]({}) {}",
 
-            MediaWikiEmitter::cond_string(evt_is_minor, "`[`minor`]` ", ""),
-            MediaWikiEmitter::cond_string(evt_is_patrolled, " `[`auto_patrolled`]` ", ""),
-            MediaWikiEmitter::cond_string(evt_is_bot, " `[`bot`]` ", ""),
+            MediaWikiEmitter::cond_string(evt_is_minor, "**minor** ", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, "**auto_patrolled** ", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, "**bot** ", ""),
 
             user,
             self.get_user_url(&user),
@@ -336,7 +336,7 @@ impl MediaWikiEmitter {
         let comment = evt["comment"].to_string();
 
         let msg = format!(
-            "`[`log/avatar`]` [{}]({}) {}",
+            "•log/avatar• [{}]({}) {}",
 
             user,
             self.get_user_url(&user),
@@ -352,7 +352,7 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "`[`log/ban`]` [{}]({}) {}",
+            "•log/ban• [{}]({}) {}",
 
             user,
             self.get_user_url(&user),
@@ -369,7 +369,7 @@ impl MediaWikiEmitter {
         let comment = evt["comment"].to_string();
 
         let msg = format!(
-            "`[`log/delete`]` [{}]({}) deleted page: [{}]({})",
+            "•log/delete• [{}]({}) deleted page: [{}]({})",
 
             user,
             self.get_user_url(&user),
@@ -391,7 +391,7 @@ impl MediaWikiEmitter {
         let target_url = self.get_url(&evt_target);
 
         let msg = format!(
-            "`[`log/move`]` [{}]({}) moved [{}]({}) to [{}]({})",
+            "•log/move• [{}]({}) moved [{}]({}) to [{}]({})",
 
             user,
             self.get_user_url(&user),
@@ -412,7 +412,7 @@ impl MediaWikiEmitter {
         let user = evt["user"].to_string();
 
         let msg = format!(
-            "`[`log/newusers`]` [{}]({}) {}",
+            "•log/newusers• [{}]({}) {}",
 
             user,
             self.get_user_url(&user),
@@ -446,7 +446,7 @@ impl MediaWikiEmitter {
         );
 
         let msg = format!(
-            "`[`log/patrol`]` [{}]({}) marked [revision {}]({}) of [{}]({}) patrolled",
+            "•log/patrol• [{}]({}) marked [revision {}]({}) of [{}]({}) patrolled",
 
             user,
             self.get_user_url(&user),
@@ -466,7 +466,7 @@ impl MediaWikiEmitter {
         let user = evt["user"].to_string();
 
         let msg = format!(
-            "`[`log/profile`]` [{}]({}) {}",
+            "•log/profile• [{}]({}) {}",
 
             user,
             self.get_user_url(&user),
@@ -482,7 +482,7 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "`[`log/rights`]` [{}]({}) {}",
+            "•log/rights• [{}]({}) {}",
 
             user,
             self.get_user_url(&user),
@@ -497,7 +497,7 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "`[`log/thanks`]` {}",
+            "•log/thanks• {}",
 
             comment
         );
@@ -511,7 +511,7 @@ impl MediaWikiEmitter {
         let file_name = format!("File:{}", evt["title"].to_string());
 
         let msg = format!(
-            "`[`log/upload`]` [{}]({}) uploaded file: [{}]({})",
+            "•log/upload• [{}]({}) uploaded file: [{}]({})",
 
             user,
             self.get_user_url(&user),
