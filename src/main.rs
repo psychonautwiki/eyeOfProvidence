@@ -369,15 +369,13 @@ impl MediaWikiEmitter {
         let comment = evt["comment"].to_string();
 
         let msg = format!(
-            "`[`log/delete`]` [{}]({}) deleted page: [{}]({}) with comment: {:?}",
+            "`[`log/delete`]` [{}]({}) deleted page: [{}]({})",
 
             user,
             self.get_user_url(&user),
 
             page,
-            self.configured_api.get_short_url(&page),
-
-            comment
+            self.get_url(&page)
         );
 
         self.configured_api.emit(msg);
