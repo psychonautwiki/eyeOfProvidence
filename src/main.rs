@@ -124,7 +124,7 @@ struct MediaWikiEmitter {
 
 impl MediaWikiEmitter {
     fn new() -> MediaWikiEmitter {
-        let configured_api = ConfiguredApi::new(&"MediaWiki", None);
+        let configured_api = ConfiguredApi::new(&"MediaWiki", Some(telegram_bot::types::ParseMode::Markdown));
 
         let emitter_rgx = EmitterRgx::new();
 
@@ -171,6 +171,26 @@ impl MediaWikiEmitter {
         self.emitter_rgx.percent_to_url(orig)
     }
 
+    fn get_user_url(&self, user: &str) -> String {
+        let target = format!(
+            "User:{}",
+
+            user
+        );
+
+        self.get_url(&target)
+    }
+
+    fn get_url(&self, page: &str) -> String {
+        let url = format!(
+            "https://psychonautwiki.org/wiki/{}",
+
+            page
+        );
+
+        self.configured_api.get_short_url(&url)
+    }
+
     fn cond_string(cond: bool, protagonist: &str, antagonist: &str) -> String {
         match cond {
             true => protagonist.to_string(),
@@ -199,23 +219,24 @@ impl MediaWikiEmitter {
         let evt_is_bot = evt["bot"].as_bool().unwrap();
 
         let url = format!(
-            "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
+            "https://psychonautwiki.org/w/index.php?title={}&type=revision&diff={:?}&oldid={:?}",
             self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_curid, evt_previd
         );
 
         let msg = format!(
-            "[edit] [{}]{}{}{} [{}] {} - {}",
-            user,
+            "{}{}{}[{}]({}) edited [{}]({}) {}",
 
-            MediaWikiEmitter::cond_string(evt_is_minor, " [minor]", ""),
-            MediaWikiEmitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
-            MediaWikiEmitter::cond_string(evt_is_bot, " [bot]", ""),
+            MediaWikiEmitter::cond_string(evt_is_minor, "`[`minor`]` ", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, " `[`auto_patrolled`]` ", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, " `[`bot`]` ", ""),
+
+            user,
+            self.get_user_url(&user),
 
             page,
+            self.configured_api.get_short_url(&url),
 
-            MediaWikiEmitter::explain_comment(&comment),
-
-            url
+            MediaWikiEmitter::explain_comment(&comment)
         );
 
         self.configured_api.emit(msg);
@@ -233,19 +254,24 @@ impl MediaWikiEmitter {
         let evt_is_bot = evt["bot"].as_bool().unwrap();
 
         let url = format!(
-            "https://psychonautwiki.org/w/index.php?title={}%26oldid={:?}",
+            "https://psychonautwiki.org/w/index.php?title={}&oldid={:?}",
             self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_curid
         );
 
         let msg = format!(
-            "[created page] [{}]{}{}{} [{}] {} - {}",
+            "`[`new`]` {}{}{}[{}]({}) created page [{}]({}) {}",
+
+            MediaWikiEmitter::cond_string(evt_is_minor, "`[`minor`]` ", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, " `[`auto_patrolled`]` ", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, " `[`bot`]` ", ""),
+
             user,
+            self.get_user_url(&user),
 
-            MediaWikiEmitter::cond_string(evt_is_minor, " [minor]", ""),
-            MediaWikiEmitter::cond_string(evt_is_patrolled, " [auto_patrolled]", ""),
-            MediaWikiEmitter::cond_string(evt_is_bot, " [bot]", ""),
+            page,
+            self.configured_api.get_short_url(&url),
 
-            page, comment, url
+            MediaWikiEmitter::explain_comment(&comment)
         );
 
         self.configured_api.emit(msg);
@@ -307,17 +333,15 @@ impl MediaWikiEmitter {
 
     fn handle_evt_log_avatar(&self, evt: &json::JsonValue) {
         let user = evt["user"].to_string();
-        let page = evt["title"].to_string();
         let comment = evt["comment"].to_string();
 
-        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page));
-
         let msg = format!(
-            "[log/avatar] [{}] {} - https://psychonautwiki.org/wiki/{}",
+            "`[`log/avatar`]` [{}]({}) {}",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&comment),
-            url_page
+            user,
+            self.get_user_url(&user),
+
+            comment
         );
 
         self.configured_api.emit(msg);
@@ -328,10 +352,12 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "[log/ban] [{}] {}",
+            "`[`log/ban`]` [{}]({}) {}",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&comment)
+            user,
+            self.get_user_url(&user),
+
+            comment
         );
 
         self.configured_api.emit(msg);
@@ -342,15 +368,16 @@ impl MediaWikiEmitter {
         let page = evt["title"].to_string();
         let comment = evt["comment"].to_string();
 
-        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page));
-
         let msg = format!(
-            "[log/delete] [{}] deleted page: {:?} with comment: {:?} - https://psychonautwiki.org/wiki/{}",
+            "`[`log/delete`]` [{}]({}) deleted page: [{}]({}) with comment: {:?}",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&page),
-            self.emitter_rgx.plusexclquest_to_url(&comment),
-            url_page
+            user,
+            self.get_user_url(&user),
+
+            page,
+            self.configured_api.get_short_url(&page),
+
+            comment
         );
 
         self.configured_api.emit(msg);
@@ -362,15 +389,20 @@ impl MediaWikiEmitter {
 
         let evt_target = evt["log_params"]["target"].to_string();
 
-        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&evt_target));
+        let orig_url = self.get_url(&page);
+        let target_url = self.get_url(&evt_target);
 
         let msg = format!(
-            "[log/move] [{}] moved {:?} to {:?} - https://psychonautwiki.org/wiki/{}",
+            "`[`log/move`]` [{}]({}) moved [{}]({}) to [{}]({})",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&page),
-            self.emitter_rgx.plusexclquest_to_url(&evt_target),
-            self.emitter_rgx.plusexclquest_to_url(&url_page)
+            user,
+            self.get_user_url(&user),
+
+            page,
+            self.get_url(&orig_url),
+
+            evt_target,
+            self.get_url(&target_url)
         );
 
         self.configured_api.emit(msg);
@@ -380,14 +412,14 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let user = evt["user"].to_string();
-        let user_page = evt["title"].to_string();
 
         let msg = format!(
-            "[log/newusers] [{}] {} - https://psychonautwiki.org/wiki/{}",
+            "`[`log/newusers`]` [{}]({}) {}",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&comment),
-            self.emitter_rgx.plusexclquest_to_url(&user_page)
+            user,
+            self.get_user_url(&user),
+
+            comment
         );
 
         self.configured_api.emit(msg);
@@ -409,19 +441,23 @@ impl MediaWikiEmitter {
 
         let user = evt["user"].to_string();
         let page = evt["title"].to_string();
-        let comment = evt["log_action_comment"].to_string();
 
         let url = format!(
-            "https://psychonautwiki.org/w/index.php?title={}%26type=revision%26diff={:?}%26oldid={:?}",
+            "https://psychonautwiki.org/w/index.php?title={}&type=revision&diff={:?}&oldid={:?}",
             self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_curid, evt_previd
         );
 
         let msg = format!(
-            "[log/patrol] [{}] {}- {}",
+            "`[`log/patrol`]` [{}]({}) marked [revision {}]({}) of [{}]({}) patrolled",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&comment),
-            url
+            user,
+            self.get_user_url(&user),
+
+            evt_curid,
+            self.configured_api.get_short_url(&url),
+
+            page,
+            self.get_url(&page)
         );
 
         self.configured_api.emit(msg);
@@ -432,9 +468,12 @@ impl MediaWikiEmitter {
         let user = evt["user"].to_string();
 
         let msg = format!(
-            "[log/profile] [{}] {}",
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&comment)
+            "`[`log/profile`]` [{}]({}) {}",
+
+            user,
+            self.get_user_url(&user),
+
+            comment
         );
 
         self.configured_api.emit(msg);
@@ -445,10 +484,12 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "[log/rights] [{}] {}",
+            "`[`log/rights`]` [{}]({}) {}",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&comment)
+            user,
+            self.get_user_url(&user),
+
+            comment
         );
 
         self.configured_api.emit(msg);
@@ -458,9 +499,9 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "[log/thanks] {:?}",
+            "`[`log/thanks`]` {}",
 
-            self.emitter_rgx.plusexclquest_to_url(&comment)
+            comment
         );
 
         self.configured_api.emit(msg);
@@ -468,16 +509,17 @@ impl MediaWikiEmitter {
 
     fn handle_evt_log_upload(&self, evt: &json::JsonValue) {
         let user = evt["user"].to_string();
-        let user_page = evt["title"].to_string();
 
-        let url_page = self.wrap_urlencode(&MediaWikiEmitter::urlencode(&user_page));
+        let file_name = format!("File:{}", evt["title"].to_string());
 
         let msg = format!(
-            "[log/upload] [{}] uploaded file: {:?} - https://psychonautwiki.org/wiki/{}",
+            "`[`log/upload`]` [{}]({}) uploaded file: [{}]({})",
 
-            self.emitter_rgx.plusexclquest_to_url(&user),
-            self.emitter_rgx.plusexclquest_to_url(&user_page),
-            url_page
+            user,
+            self.get_user_url(&user),
+
+            file_name,
+            self.get_url(&file_name)
         );
 
         self.configured_api.emit(msg);
@@ -733,7 +775,7 @@ impl EoP {
         let ge = Arc::new(Mutex::new(GithubEmitter::new()));
         let gex = ge.clone();
 
-        hub.handle_authenticated("*", "8ud0TINnO5V/wFjEzU+kwRkYQhwr7ddX7kUM+MC9pEM=", move |delivery: &Delivery| {
+        hub.handle("*", move |delivery: &Delivery| {
             gex.lock().unwrap().handle_evt(delivery);
         });
 
