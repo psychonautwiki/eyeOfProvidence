@@ -530,8 +530,7 @@ impl MediaWikiEmitter {
 
     fn handle_evt_log_upload(&self, evt: &json::JsonValue) {
         let user = evt["user"].to_string();
-
-        let file_name = format!("File:{}", evt["title"].to_string());
+        let file = evt["title"].to_string();
 
         let msg = format!(
             "`[`log/upload`]` [{}]({}) uploaded file: [{}]({})",
@@ -539,8 +538,8 @@ impl MediaWikiEmitter {
             user,
             self.get_user_url(&user),
 
-            file_name,
-            self.get_url(&file_name)
+            file,
+            self.get_url(&file)
         );
 
         self.configured_api.emit(msg);
