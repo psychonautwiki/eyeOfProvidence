@@ -694,9 +694,9 @@ impl GithubEmitter {
                     self.configured_api.get_short_url(&sender.html_url)
                 ));
             },
-            afterparty::Event::Push { ref sender, ref commits, ref compare, ref _ref, ref head_commit, ref repository, .. } => {
+            afterparty::Event::Push { ref sender, ref commits, ref compare, ref repository, .. } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) pushed [{} commit{}]({}) to [{}]({}) ([{}]({}))",
+                    "[{}]({}) pushed [{} commit{}]({}) to [{}]({}){}",
 
                     sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
@@ -708,8 +708,13 @@ impl GithubEmitter {
                     repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url),
 
-                    _ref,
-                    self.configured_api.get_short_url(&head_commit.url)
+                    {
+                        if commits.len() == 1 {
+                            format!(": {}", commits[0].message)
+                        } else {
+                            "".to_string()
+                        }
+                    },
                 ));
             },
             afterparty::Event::Repository { ref sender, ref action, ref repository, .. } => {
