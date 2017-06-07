@@ -410,9 +410,6 @@ impl MediaWikiEmitter {
 
         let evt_target = evt["log_params"]["target"].to_string();
 
-        let orig_url = self.get_url(&page);
-        let target_url = self.get_url(&evt_target);
-
         let msg = format!(
             "`[`log/move`]` [{}]({}) moved [{}]({}) to [{}]({})",
 
@@ -420,10 +417,10 @@ impl MediaWikiEmitter {
             self.get_user_url(&user),
 
             page,
-            self.get_url(&orig_url),
+            self.get_url(&page),
 
             evt_target,
-            self.get_url(&target_url)
+            self.get_url(&evt_target)
         );
 
         self.configured_api.emit(msg);
