@@ -1,4 +1,4 @@
-FROM kenansulayman/rust-nightly:latest
+FROM psychonaut/rust-nightly:latest
 
 ADD . /my-source
 
