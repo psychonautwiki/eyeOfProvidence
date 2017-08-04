@@ -8,7 +8,10 @@ extern crate afterparty;
 use afterparty::{Delivery, Hub};
 
 extern crate hyper;
-use hyper::Server;
+
+use hyper::{Client, Server};
+
+use std::io::Read;
 
 extern crate url;
 use url::percent_encoding::{
@@ -28,6 +31,88 @@ use urlshortener::{Provider, UrlShortener};
 
 const MEDIAWIKI_ENDPOINT: &'static str = "0.0.0.0:3000";
 const GITHUB_ENDPOINT: &'static str = "0.0.0.0:4567";
+
+const PW_API_URL_PREFIX: &'static str = "https://psychonautwiki.org/w/api.php";
+
+fn legacy_hyper_load_url (url: String) -> Option<json::JsonValue> {
+    let client = Client::new();
+
+    let res = client.get(&url).send();
+
+    if !res.is_ok() {
+        return None;
+    }
+
+    let mut res = res.unwrap();
+
+    let mut buf = String::new();
+
+    match res.read_to_string(&mut buf) {
+        Ok(_) => {},
+        _ => {
+            return None;
+        }
+    }
+
+    match json::parse(&buf) {
+        Ok(data) => Some(data),
+        Err(_) => None
+    }
+}
+
+#[derive(Debug)]
+struct RevInfo (String, String);
+
+fn get_revision_info(title: String, rev_id: String) -> Option<RevInfo> {
+    let title = title;
+    let rev_id = rev_id;
+
+    let url = format!(
+        "{}?action=query&prop=revisions&titles={}&rvprop=timestamp%7Cuser%7Ccomment%7Ccontent&rvstartid={}&rvendid={}&format=json",
+
+        PW_API_URL_PREFIX,
+        title,
+        rev_id,
+        rev_id
+    );
+
+    let revision_data = legacy_hyper_load_url(url);
+
+    if !revision_data.is_some() {
+        return None;
+    }
+
+    let revision_data = revision_data.unwrap();
+
+    let pages = &revision_data["query"]["pages"];
+
+    // "-1" is used to denote "not found" in mediawiki
+    if pages.has_key("-1") || pages.len() != 1usize {
+        return None;
+    }
+
+    // Obtain page_id
+
+    let mut entry: &str = "";
+
+    for (key, _) in pages.entries() {
+        entry = key;
+    }
+
+    // try to obtain the target revision
+    let results = &pages[entry]["revisions"][0].clone();
+
+    if results.is_empty() {
+        return None;
+    }
+
+    Some(
+        RevInfo(
+            results["user"].to_string(),
+            results["comment"].to_string()
+        )
+    )
+}
 
 struct EmitterRgx {
     percent_rgx: regex::Regex,
@@ -460,19 +545,59 @@ impl MediaWikiEmitter {
         let user = evt["user"].to_string();
         let page = evt["title"].to_string();
 
+        let rev_info: Option<RevInfo> = get_revision_info(page.clone(), evt_curid.to_string());
+
+        let has_rev_info = rev_info.is_some();
+
+        if !has_rev_info {
+            eprintln!(
+                "Failed to obtain revision information for page='{}', rev_id='{}'",
+
+                page, evt_curid
+            );
+        }
+
+        // extract user and comment from revision data
+        let (rev_by_user, rev_comment) = {
+            if !has_rev_info {
+                (String::new(), String::new())
+            } else {
+                let rev_info = rev_info.unwrap();
+
+                (rev_info.0, rev_info.1)
+            }
+        };
+
+        let rev_info_msg_user = {
+            if !has_rev_info {
+                String::new()
+            } else {
+                format!(
+                    " by [{}]({}) (\"{}\")",
+
+                    rev_by_user,
+                    self.get_user_url(&rev_by_user),
+
+                    rev_comment
+                )
+            }
+        };
+
         let url = format!(
             "https://psychonautwiki.org/w/index.php?title={}&type=revision&diff={:?}&oldid={:?}",
             self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_curid, evt_previd
         );
 
         let msg = format!(
-            "`[`log/patrol`]` [{}]({}) marked [revision {}]({}) of [{}]({}) patrolled",
+            "`[`log/patrol`]` [{}]({}) marked [revision {}]({}){} of [{}]({}) patrolled",
 
             user,
             self.get_user_url(&user),
 
             evt_curid,
             self.configured_api.get_short_url(&url),
+
+            rev_info_msg_user,
 
             page,
             self.get_url(&page)
