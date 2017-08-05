@@ -6,6 +6,7 @@ version = "0.1.0"
 [dependencies]
 afterparty = "0.2.0"
 env_logger = "0.4.2"
+htmlescape = "0.3.1"
 hyper = "0.9.10"
 json = "0.10.2"
 log = "0.3.7"
