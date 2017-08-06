@@ -4,9 +4,6 @@ use std::net::UdpSocket;
 extern crate telegram_bot;
 extern crate json;
 
-extern crate htmlescape;
-use htmlescape::encode_attribute;
-
 extern crate afterparty;
 use afterparty::{Delivery, Hub};
 
@@ -690,10 +687,10 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) started watching [{}]({})",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
-                    encode_attribute(&repository.full_name),
+                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url)
                 ));
             },
@@ -701,16 +698,16 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) created a comment on [{}]({})",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
-                    encode_attribute(&format!(
+                    format!(
                         "{}/{}:{}",
 
                         repository.full_name,
                         comment.path.clone().unwrap_or("".to_string()),
                         comment.line.clone().unwrap_or("".to_string())
-                    )),
+                    ),
 
                     self.configured_api.get_short_url(&comment.html_url)
                 ));
@@ -719,13 +716,13 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) forked [{}]({}) as [{}]({})",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
-                    encode_attribute(&repository.full_name),
+                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url),
 
-                    encode_attribute(&forkee.full_name),
+                    forkee.full_name,
                     self.configured_api.get_short_url(&forkee.html_url),
                 ));
             },
@@ -733,12 +730,12 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) {} a comment on issue [{}]({}) ({:?})",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
-                    encode_attribute(&action),
+                    action,
 
-                    encode_attribute(&format!("{}#{}", repository.full_name, issue.number)),
+                    format!("{}#{}", repository.full_name, issue.number),
 
                     {
                         if action == "deleted" {
@@ -748,22 +745,22 @@ impl GithubEmitter {
                         }
                     },
 
-                    encode_attribute(&issue.title)
+                    issue.title
                 ));
             },
             afterparty::Event::Issues { ref sender, ref action, ref issue, ref repository } => {
                 self.configured_api.emit(format!(
                     "[{}]({}) {} issue [{}]({}) ({:?})",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
-                    encode_attribute(&action),
+                    action,
 
-                    encode_attribute(&format!("{}#{}", repository.full_name, issue.number)),
+                    format!("{}#{}", repository.full_name, issue.number),
                     self.configured_api.get_short_url(&issue.html_url),
 
-                    encode_attribute(&issue.title)
+                    issue.title
                 ));
             },
             afterparty::Event::Member { ref sender, ref action, ref member, ref repository } => {
@@ -784,17 +781,17 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) {} [{}]({}) {} [{}]({})",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
                     perm_verb,
 
-                    encode_attribute(&member.login),
+                    member.login,
                     self.configured_api.get_short_url(&member.html_url),
 
                     perm_suffix,
 
-                    encode_attribute(&repository.full_name),
+                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url),
                 ));
             },
@@ -802,7 +799,7 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) was {} [{}/{}]({}) by [{}]({})",
 
-                    encode_attribute(&member.login),
+                    member.login,
                     self.configured_api.get_short_url(&member.html_url),
 
                     {
@@ -813,12 +810,12 @@ impl GithubEmitter {
                         }
                     },
 
-                    encode_attribute(&organization.login),
+                    organization.login,
 
-                    encode_attribute(&team.name),
+                    team.name,
                     self.configured_api.get_short_url(&team.members_url),
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url)
                 ));
             },
@@ -826,19 +823,19 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) pushed [{} commit{}]({}) to [{}]({}){}",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
                     commits.len(),
                     { if commits.len() == 1 { "" } else { "s" } },
                     self.configured_api.get_short_url(&compare),
 
-                    encode_attribute(&repository.full_name),
+                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url),
 
                     {
                         if commits.len() == 1 {
-                            format!(": {}", encode_attribute(&commits[0].message))
+                            format!(": {}", commits[0].message)
                         } else {
                             "".to_string()
                         }
@@ -849,12 +846,12 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     "[{}]({}) {} repository [{}]({})",
 
-                    encode_attribute(&sender.login),
+                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
 
-                    encode_attribute(&action),
+                    action,
 
-                    encode_attribute(&repository.full_name),
+                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url)
                 ));
             },
