@@ -916,8 +916,8 @@ struct JiraEventStatus {
 
 #[derive(Serialize, Deserialize)]
 struct JiraEventUser {
-  #[serde(rename = "self")]
-  _self: String,
+  #[serde(rename = "accountId")]
+  account_id: String,
   #[serde(rename = "displayName")]
   display_name: String,
 }
@@ -973,27 +973,25 @@ impl JiraEmitter {
 
     fn _get_formatted_event(&self, event: JiraEvent, event_type: JiraEventTypes) -> String {
         format!(
-r#"{} <a href="{}">{}</a> [{}] was {} by <a href="{}">{}</a>
-<b>{}</b>
+            r#"[<i>{}</i> | <i>{}</i>] <a href="https://psychonaut.atlassian.net/people/{}">{}</a> {} {} <a href="https://psychonaut.atlassian.net/browse/{}">{}</a> [{}]: <b>{}</b>"#,
 
-<b>{}</b> / <b>{}</b> ({})
-Reporter: <b><a href="{}">{}</a></b>
-Creator: <b><a href="{}">{}</a></b>"#,
-            event.issue.fields.issuetype.name,
-            event.issue._self,
-            event.issue.key,
-            event.issue.fields.project.name,
-            self._get_verb_from_type(event_type),
-            event.user._self,
+            event.issue.fields.priority.name.to_lowercase(),
+
+            event.issue.fields.status.name.to_lowercase(),
+
+            event.user.account_id,
             event.user.display_name,
-            event.issue.fields.summary,
-            event.issue.fields.priority.name,
-            event.issue.fields.status.name,
-            event.issue.fields.status.status_category.name,
-            event.issue.fields.reporter._self,
-            event.issue.fields.reporter.display_name,
-            event.issue.fields.creator._self,
-            event.issue.fields.creator.display_name,
+
+            self._get_verb_from_type(event_type),
+
+            event.issue.fields.issuetype.name.to_lowercase(),
+
+            event.issue.key,
+            event.issue.key,
+
+            event.issue.fields.project.name,
+
+            event.issue.fields.summary
         )
     }
 
