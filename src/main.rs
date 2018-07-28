@@ -924,9 +924,9 @@ struct JiraEventUser {
 
 #[derive(Serialize, Deserialize)]
 struct JiraEvent<'a> {
-  #[serde(rename = "webhookEvent")]
   user: JiraEventUser,
   issue: JiraEventIssue,
+  #[serde(rename = "webhookEvent")]
   webhook_event: &'a str,
 }
 
