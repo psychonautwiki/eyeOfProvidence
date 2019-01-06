@@ -235,26 +235,22 @@ impl MediaWikiEmitter {
     fn handle_evt(&self, evt: &json::JsonValue) {
         let evt_type = evt["type"].to_string();
 
-        if evt_type == "edit" {
-            return self.handle_evt_edit(evt);
-        }
+        match &*evt_type {
+            "edit" => self.handle_evt_edit(evt),
+            "new" => self.handle_evt_new(evt),
+            "log" => self.handle_evt_log(evt),
+            _ => {
+                if evt_type == "null" {
+                    return;
+                }
 
-        if evt_type == "new" {
-            return self.handle_evt_new(evt);
-        }
+                let msg = format!(
+                    "[not_implemented] {}",
+                    evt.dump()
+                );
 
-        if evt_type == "log" {
-            return self.handle_evt_log(evt);
-        }
-
-        // not implemented
-        if evt_type != "null" {
-            let msg = format!(
-                "[not_implemented] {}",
-                evt.dump()
-            );
-
-            self.configured_api.emit(msg);
+                self.configured_api.emit(msg);
+            }
         }
     }
 
@@ -402,54 +398,29 @@ impl MediaWikiEmitter {
     fn handle_evt_log(&self, evt: &json::JsonValue) {
         let log_type = evt["log_type"].to_string();
 
-        if log_type == "avatar" {
-            return self.handle_evt_log_avatar(evt);
-        }
+        match &*log_type {
+            "avatar" => self.handle_evt_log_avatar(evt),
+            "block" => self.handle_evt_log_block(evt),
+            "delete" => self.handle_evt_log_delete(evt),
+            "move" => self.handle_evt_log_move(evt),
+            "newusers" => self.handle_evt_log_newusers(evt),
+            "patrol" => self.handle_evt_log_patrol(evt),
+            "profile" => self.handle_evt_log_profile(evt),
+            "rights" => self.handle_evt_log_rights(evt),
+            "thanks" => self.handle_evt_log_thanks(evt),
+            "upload" => self.handle_evt_log_upload(evt),
+            _ => {
+                if log_type == "null" {
+                    return;
+                }
 
-        if log_type == "block" {
-            return self.handle_evt_log_block(evt);
-        }
+                let msg = format!(
+                    "[log_not_implemented] {}",
+                    self.emitter_rgx.plusexclquest_to_url(&evt.dump())
+                );
 
-        if log_type == "delete" {
-            return self.handle_evt_log_delete(evt);
-        }
-
-        if log_type == "move" {
-            return self.handle_evt_log_move(evt);
-        }
-
-        if log_type == "newusers" {
-            return self.handle_evt_log_newusers(evt);
-        }
-
-        if log_type == "patrol" {
-            return self.handle_evt_log_patrol(evt);
-        }
-
-        if log_type == "profile" {
-            return self.handle_evt_log_profile(evt);
-        }
-
-        if log_type == "rights" {
-            return self.handle_evt_log_rights(evt);
-        }
-
-        if log_type == "thanks" {
-            return self.handle_evt_log_thanks(evt);
-        }
-
-        if log_type == "upload" {
-            return self.handle_evt_log_upload(evt);
-        }
-
-        // not implemented
-        if log_type != "null" {
-            let msg = format!(
-                "[log_not_implemented] {}",
-                self.emitter_rgx.plusexclquest_to_url(&evt.dump())
-            );
-
-            self.configured_api.emit(msg);
+                self.configured_api.emit(msg);
+            }
         }
     }
 
