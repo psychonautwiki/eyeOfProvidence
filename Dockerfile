@@ -3,7 +3,7 @@ FROM psychonaut/rust-nightly:2018-12-05
 ADD . /my-source
 
 RUN    cd /my-source \
-    && cargo build -v --release \
+    && cargo rustc --verbose --release -- -C target-cpu=native \
     && mv /my-source/target/release/eye_of_providence /eye_of_providence \
     && rm -rfv /my-source
 
