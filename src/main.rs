@@ -24,7 +24,7 @@ extern crate scoped_threadpool;
 use scoped_threadpool::Pool;
 
 extern crate urlshortener;
-use urlshortener::{Provider, UrlShortener};
+use urlshortener::{providers::Provider, client::UrlShortener};
 
 extern crate telegram_bot;
 extern crate tokio_core;
@@ -178,7 +178,8 @@ impl ConfiguredApi {
         };
 
         let emitter_rgx = EmitterRgx::new();
-        let url_shortener = UrlShortener::new();
+
+        let url_shortener = UrlShortener::new().unwrap();
 
         ConfiguredApi {
             api,
@@ -193,8 +194,7 @@ impl ConfiguredApi {
 
     fn get_short_url (&self, long_url: &str) -> String {
         match self.url_shortener.generate(long_url.to_string(), &Provider::IsGd) {
-            // Ok(short_url) => short_url,
-            Ok(short_url) => long_url.to_string(),
+            Ok(short_url) => short_url,
             Err(_) => long_url.to_string()
         }
     }
