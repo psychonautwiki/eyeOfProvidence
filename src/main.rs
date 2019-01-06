@@ -1,6 +1,7 @@
 use std::str;
 use std::net::UdpSocket;
 
+extern crate telegram_bot;
 extern crate json;
 
 extern crate afterparty;
@@ -20,16 +21,13 @@ use url::percent_encoding::{
 extern crate regex;
 use regex::Regex;
 
+use std::sync::{Arc, Mutex};
+
 extern crate scoped_threadpool;
 use scoped_threadpool::Pool;
 
 extern crate urlshortener;
-use urlshortener::{providers::Provider, client::UrlShortener};
-
-extern crate telegram_bot;
-extern crate tokio_core;
-
-use tokio_core::reactor::Core;
+use urlshortener::{Provider, UrlShortener};
 
 #[macro_use]
 extern crate serde_derive;
@@ -164,22 +162,17 @@ struct ConfiguredApi {
     api: telegram_bot::Api,
     channel_id: i64,
     name: String,
-    parse_mode: telegram_bot::types::ParseMode,
+    parse_mode: Option<telegram_bot::types::ParseMode>,
     emitter_rgx: EmitterRgx,
     url_shortener: UrlShortener,
 }
 
 impl ConfiguredApi {
     fn new(name: &str, parse_mode: Option<telegram_bot::types::ParseMode>) -> ConfiguredApi {
-        let api = {
-            let core = Core::new().unwrap();
-
-            telegram_bot::Api::configure(std::env::var("TELEGRAM_TOKEN").unwrap()).build(core.handle()).unwrap()
-        };
+        let api = telegram_bot::Api::from_env("TELEGRAM_TOKEN").unwrap();
 
         let emitter_rgx = EmitterRgx::new();
-
-        let url_shortener = UrlShortener::new().unwrap();
+        let url_shortener = UrlShortener::new();
 
         ConfiguredApi {
             api,
@@ -188,7 +181,7 @@ impl ConfiguredApi {
 
             channel_id: -1001050593583,
             name: name.to_string(),
-            parse_mode: parse_mode.unwrap()
+            parse_mode: parse_mode
         }
     }
 
@@ -200,16 +193,28 @@ impl ConfiguredApi {
     }
 
     fn emit<T: Into<String>>(&self, msg: T) {
-        let msg_body = self.emitter_rgx.plusexclquest_to_url(
+        let msg = self.emitter_rgx.plusexclquest_to_url(
             &format!("⥂ {} ⟹ {}", self.name, msg.into())
         );
 
-        let chat_id = telegram_bot::types::ChannelId::new(self.channel_id);
+        let _ = self.api.send_message(
+            /*chat_id*/
+            self.channel_id,
 
-        self.api.spawn(
-            telegram_bot::types::requests::SendMessage::new(chat_id, msg_body)
-            .disable_preview()
-            .parse_mode(self.parse_mode)
+            /*text*/
+            msg,
+
+            /*parse_mode*/
+            self.parse_mode,
+
+            /*disable_web_page_preview*/
+            Some(true),
+
+            /*reply_to_message_id*/
+            None,
+
+            /*reply_markup*/
+            None
         );
     }
 }
@@ -1203,8 +1208,11 @@ impl EoP {
     fn init_github () {
         let mut hub = Hub::new();
 
+        let ge = Arc::new(Mutex::new(GithubEmitter::new()));
+        let gex = ge.clone();
+
         hub.handle("*", move |delivery: &Delivery| {
-            GithubEmitter::new().handle_evt(delivery);
+            gex.lock().unwrap().handle_evt(delivery);
         });
 
         let srvc = match Server::http(GITHUB_ENDPOINT) {
@@ -1220,6 +1228,8 @@ impl EoP {
     }
 
     fn init_jira () {
+        let jira_emitter = Arc::new(Mutex::new(JiraEmitter::new()));
+
         let server = rouille::Server::new(
             JIRA_ENDPOINT,
             move |request| {
@@ -1243,7 +1253,7 @@ impl EoP {
                                 }
                             };
 
-                            JiraEmitter::new().handle_evt(data);
+                            jira_emitter.lock().unwrap().handle_evt(data);
 
                             rouille::Response::json(&r#"{"ok":true}"#)
                         },
