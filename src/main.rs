@@ -662,7 +662,7 @@ struct GithubEmitter {
 
 impl GithubEmitter {
     fn new() -> GithubEmitter {
-        let configured_api = ConfiguredApi::new(&"*GitHub*", Some(telegram_bot::types::ParseMode::Markdown));
+        let configured_api = ConfiguredApi::new(&"*GitHub*", Some(telegram_bot::types::ParseMode::Html));
 
         GithubEmitter {
             configured_api
@@ -673,21 +673,24 @@ impl GithubEmitter {
         match delivery.payload {
             afterparty::Event::Watch { ref sender, ref repository, .. } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) started watching [{}]({})",
+                    r#"<a href="{}">{}</a> started watching <a href="{}>{}</a>"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
 
+                    self.configured_api.get_short_url(&repository.html_url),
                     repository.full_name,
-                    self.configured_api.get_short_url(&repository.html_url)
                 ));
             },
             afterparty::Event::CommitComment { ref sender, ref comment, ref repository, .. } => {
+                println!("got a comment...");
                 self.configured_api.emit(format!(
-                    "[{}]({}) created a comment on [{}]({})",
+                    r#"<a href="{}">{}</a> created a comment on <a href="{}">{}</a>"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
+
+                    self.configured_api.get_short_url(&comment.html_url),
 
                     format!(
                         "{}/{}:{}",
@@ -695,35 +698,31 @@ impl GithubEmitter {
                         repository.full_name,
                         comment.path.clone().unwrap_or("".to_string()),
                         comment.line.clone().unwrap_or("".to_string())
-                    ),
-
-                    self.configured_api.get_short_url(&comment.html_url)
+                    )
                 ));
             },
             afterparty::Event::Fork { ref sender, ref repository, ref forkee } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) forked [{}]({}) as [{}]({})",
+                    r#"<a href="{}">{}</a> forked <a href="{}">{}</a> as <a href="{}">{}</a>"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
 
-                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url),
+                    repository.full_name,
 
-                    forkee.full_name,
                     self.configured_api.get_short_url(&forkee.html_url),
+                    forkee.full_name,
                 ));
             },
             afterparty::Event::IssueComment { ref sender, ref action, ref comment, ref issue, ref repository } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) {} a comment on issue [{}]({}) ({:?})",
+                    r#"<a href="{}">{}</a> {} a comment on issue <a href="{}">{}</a> ({:?})"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
 
                     action,
-
-                    format!("{}#{}", repository.full_name, issue.number),
 
                     {
                         if action == "deleted" {
@@ -733,20 +732,22 @@ impl GithubEmitter {
                         }
                     },
 
+                    format!("{}#{}", repository.full_name, issue.number),
+
                     issue.title
                 ));
             },
             afterparty::Event::Issues { ref sender, ref action, ref issue, ref repository } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) {} issue [{}]({}) ({:?})",
+                    r#"<a href="{}">{}</a> {} issue <a href="{}">{}</a> ({:?})"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
 
                     action,
 
-                    format!("{}#{}", repository.full_name, issue.number),
                     self.configured_api.get_short_url(&issue.html_url),
+                    format!("{}#{}", repository.full_name, issue.number),
 
                     issue.title
                 ));
@@ -767,28 +768,28 @@ impl GithubEmitter {
                 }
 
                 self.configured_api.emit(format!(
-                    "[{}]({}) {} [{}]({}) {} [{}]({})",
+                    r#"<a href="{}">{}</a> {} <a href="{}">{}</a> {} <a href="{}">{}</a>"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
 
                     perm_verb,
 
-                    member.login,
                     self.configured_api.get_short_url(&member.html_url),
+                    member.login,
 
                     perm_suffix,
 
-                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url),
+                    repository.full_name,
                 ));
             },
             afterparty::Event::Membership { ref sender, ref action, ref member, ref team, ref organization, .. } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) was {} [{}/{}]({}) by [{}]({})",
+                    r#"<a href="{}">{}</a> was {} <a href="{}">{}/{}</a> by <a href="{}">{}</a>"#,
 
-                    member.login,
                     self.configured_api.get_short_url(&member.html_url),
+                    member.login,
 
                     {
                         if action == "added" {
@@ -798,28 +799,28 @@ impl GithubEmitter {
                         }
                     },
 
-                    organization.login,
-
-                    team.name,
                     self.configured_api.get_short_url(&team.members_url),
 
+                    organization.login,
+                    team.name,
+
+                    self.configured_api.get_short_url(&sender.html_url),
                     sender.login,
-                    self.configured_api.get_short_url(&sender.html_url)
                 ));
             },
             afterparty::Event::Push { ref sender, ref commits, ref compare, ref repository, .. } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) pushed [{} commit{}]({}) to [{}]({}){}",
+                    r#"<a href="{}">{}</a> pushed <a href="{}">{} commit{}</a> to <a href="{}">{}</a>{}"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
 
+                    self.configured_api.get_short_url(&compare),
                     commits.len(),
                     { if commits.len() == 1 { "" } else { "s" } },
-                    self.configured_api.get_short_url(&compare),
 
-                    repository.full_name,
                     self.configured_api.get_short_url(&repository.html_url),
+                    repository.full_name,
 
                     {
                         if commits.len() == 1 {
@@ -832,15 +833,15 @@ impl GithubEmitter {
             },
             afterparty::Event::Repository { ref sender, ref action, ref repository, .. } => {
                 self.configured_api.emit(format!(
-                    "[{}]({}) {} repository [{}]({})",
+                    r#"<a href="{}">{}</a> {} repository <a href="{}">{}</a>"#,
 
-                    sender.login,
                     self.configured_api.get_short_url(&sender.html_url),
+                    sender.login,
 
                     action,
 
+                    self.configured_api.get_short_url(&repository.html_url),
                     repository.full_name,
-                    self.configured_api.get_short_url(&repository.html_url)
                 ));
             },
             _ => (),
