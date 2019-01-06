@@ -70,14 +70,14 @@ fn legacy_hyper_load_url (url: String) -> Option<json::JsonValue> {
 }
 
 #[derive(Debug)]
-struct RevInfo (String, String);
+struct RevInfo (String, String, String);
 
 fn get_revision_info(title: String, rev_id: String) -> Option<RevInfo> {
     let title = title;
     let rev_id = rev_id;
 
     let url = format!(
-        "{}?action=query&prop=revisions&titles={}&rvprop=timestamp%7Cuser%7Ccomment%7Ccontent&rvstartid={}&rvendid={}&format=json",
+        "{}?action=query&prop=revisions&titles={}&rvprop=timestamp%7Cuser%7Ccomment%7Ccontent%7Cids&rvstartid={}&rvendid={}&format=json",
 
         PW_API_URL_PREFIX,
         title,
@@ -118,7 +118,8 @@ fn get_revision_info(title: String, rev_id: String) -> Option<RevInfo> {
     Some(
         RevInfo(
             results["user"].to_string(),
-            results["comment"].to_string()
+            results["comment"].to_string(),
+            results["parentid"].to_string()
         )
     )
 }
@@ -162,18 +163,21 @@ struct ConfiguredApi {
     channel_id: i64,
     name: String,
     parse_mode: Option<telegram_bot::types::ParseMode>,
-    url_shortener: UrlShortener
+    emitter_rgx: EmitterRgx,
+    url_shortener: UrlShortener,
 }
 
 impl ConfiguredApi {
     fn new(name: &str, parse_mode: Option<telegram_bot::types::ParseMode>) -> ConfiguredApi {
         let api = telegram_bot::Api::from_env("TELEGRAM_TOKEN").unwrap();
 
+        let emitter_rgx = EmitterRgx::new();
         let url_shortener = UrlShortener::new();
 
         ConfiguredApi {
-            api: api,
-            url_shortener: url_shortener,
+            api,
+            emitter_rgx,
+            url_shortener,
 
             channel_id: -1001050593583,
             name: name.to_string(),
@@ -189,12 +193,16 @@ impl ConfiguredApi {
     }
 
     fn emit<T: Into<String>>(&self, msg: T) {
+        let msg = self.emitter_rgx.plusexclquest_to_url(
+            &format!("⥂ {} ⟹ {}", self.name, msg.into())
+        );
+
         let _ = self.api.send_message(
             /*chat_id*/
             self.channel_id,
 
             /*text*/
-            format!("⥂ {} ⟹ {}", self.name, msg.into()),
+            msg,
 
             /*parse_mode*/
             self.parse_mode,
@@ -222,7 +230,7 @@ struct MediaWikiEmitter {
 
 impl MediaWikiEmitter {
     fn new() -> MediaWikiEmitter {
-        let configured_api = ConfiguredApi::new(&"*MediaWiki*", Some(telegram_bot::types::ParseMode::Markdown));
+        let configured_api = ConfiguredApi::new(&"<b>MediaWiki</b>", Some(telegram_bot::types::ParseMode::Html));
 
         let emitter_rgx = EmitterRgx::new();
 
@@ -237,8 +245,8 @@ impl MediaWikiEmitter {
 
         match &*evt_type {
             "edit" => self.handle_evt_edit(evt),
-            "new" => self.handle_evt_new(evt),
             "log" => self.handle_evt_log(evt),
+            "new" => self.handle_evt_new(evt),
             _ => {
                 if evt_type == "null" {
                     return;
@@ -322,13 +330,13 @@ impl MediaWikiEmitter {
         let flags = format!(
             "{}{}{}",
 
-            MediaWikiEmitter::cond_string(evt_is_minor, "*minor* ", ""),
-            MediaWikiEmitter::cond_string(evt_is_patrolled, "*patrolled* ", ""),
-            MediaWikiEmitter::cond_string(evt_is_bot, "*bot* ", "")
+            MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor<b> ", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, "<b>patrolled</b> ", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, "<b>bot</b> ", "")
         );
 
         let msg = format!(
-            "{}[{}]({}) edited [{}]({}) {}",
+            r#"{}<a href="{}">{}</a> edited <a href="{}">{}</a> {}"#,
 
             MediaWikiEmitter::cond_string(
                 has_flags,
@@ -336,11 +344,11 @@ impl MediaWikiEmitter {
                 ""
             ),
 
-            user,
             self.get_user_url(&user),
+            user,
 
-            page,
             self.configured_api.get_short_url(&url),
+            page,
 
             MediaWikiEmitter::explain_comment(&comment)
         );
@@ -369,13 +377,13 @@ impl MediaWikiEmitter {
         let flags = format!(
             "{}{}{}",
 
-            MediaWikiEmitter::cond_string(evt_is_minor, "*minor* ", ""),
-            MediaWikiEmitter::cond_string(evt_is_patrolled, "*patrolled* ", ""),
-            MediaWikiEmitter::cond_string(evt_is_bot, "*bot* ", "")
+            MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor<b> ", ""),
+            MediaWikiEmitter::cond_string(evt_is_patrolled, "<b>patrolled</b> ", ""),
+            MediaWikiEmitter::cond_string(evt_is_bot, "<b>bot</b> ", "")
         );
 
         let msg = format!(
-            "`[`new`]` {}[{}]({}) created page [{}]({}) {}",
+            r#"[new] {}<a href="{}">{}</a> created page <a href="{}">{}</a> {}"#,
 
             MediaWikiEmitter::cond_string(
                 has_flags,
@@ -383,11 +391,11 @@ impl MediaWikiEmitter {
                 ""
             ),
 
-            user,
             self.get_user_url(&user),
+            user,
 
-            page,
             self.configured_api.get_short_url(&url),
+            page,
 
             MediaWikiEmitter::explain_comment(&comment)
         );
@@ -399,6 +407,7 @@ impl MediaWikiEmitter {
         let log_type = evt["log_type"].to_string();
 
         match &*log_type {
+            "approval" => self.handle_evt_log_approval(evt),
             "avatar" => self.handle_evt_log_avatar(evt),
             "block" => self.handle_evt_log_block(evt),
             "delete" => self.handle_evt_log_delete(evt),
@@ -429,10 +438,10 @@ impl MediaWikiEmitter {
         let comment = evt["comment"].to_string();
 
         let msg = format!(
-            "`[`log/avatar`]` [{}]({}) {}",
+            r#"[log/avatar] <a href="{}">{}</a> {}"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
             comment
         );
@@ -445,10 +454,10 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "`[`log/ban`]` [{}]({}) {}",
+            r#"[log/ban] <a href="{}">{}</a> {}"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
             comment
         );
@@ -461,13 +470,13 @@ impl MediaWikiEmitter {
         let page = evt["title"].to_string();
 
         let msg = format!(
-            "`[`log/delete`]` [{}]({}) deleted page: [{}]({})",
+            r#"[log/delete] <a href="{}">{}</a> deleted page: <a href="{}">{}</a>"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
-            page,
-            self.get_url(&page)
+            self.get_url(&page),
+            page
         );
 
         self.configured_api.emit(msg);
@@ -480,16 +489,16 @@ impl MediaWikiEmitter {
         let evt_target = evt["log_params"]["target"].to_string();
 
         let msg = format!(
-            "`[`log/move`]` [{}]({}) moved [{}]({}) to [{}]({})",
+            r#"[log/move] <a href="{}">{}</a> moved <a href="{}">{}</a> to <a href="{}">{}</a>"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
-            page,
             self.get_url(&page),
+            page,
 
-            evt_target,
-            self.get_url(&evt_target)
+            self.get_url(&evt_target),
+            evt_target
         );
 
         self.configured_api.emit(msg);
@@ -501,12 +510,171 @@ impl MediaWikiEmitter {
         let user = evt["user"].to_string();
 
         let msg = format!(
-            "`[`log/newusers`]` [{}]({}) {}",
+            r#"[log/newusers] <a href="{}">{}</a> {}"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
             comment
+        );
+
+        self.configured_api.emit(msg);
+    }
+
+    fn handle_evt_log_approval(&self, evt: &json::JsonValue) {
+        let log_type = evt["log_action"].to_string();
+
+        match &*log_type {
+            "approve" => self.handle_evt_log_approval_approve(evt),
+            "unapprove" => self.handle_evt_log_approval_unapprove(evt),
+            _ => {
+                if log_type == "null" {
+                    return;
+                }
+
+                let msg = format!(
+                    "[log/approval/not_implemented] {}",
+                    self.emitter_rgx.plusexclquest_to_url(&evt.dump())
+                );
+
+                self.configured_api.emit(msg);
+            }
+        }
+    }
+
+    fn handle_evt_log_approval_approve(&self, evt: &json::JsonValue) {
+        let evt_revid = evt["log_params"]["rev_id"].as_u32().unwrap();
+        let evt_oldrevid = evt["log_params"]["old_rev_id"].as_u32().unwrap();
+
+        let user = evt["user"].to_string();
+        let page = evt["title"].to_string();
+
+        let rev_info: Option<RevInfo> = get_revision_info(page.clone(), evt_revid.to_string());
+
+        let has_rev_info = rev_info.is_some();
+
+        if !has_rev_info {
+            eprintln!(
+                "Failed to obtain revision information for page='{}', rev_id='{}'",
+
+                page, evt_revid
+            );
+        }
+
+        // extract user and comment from revision data
+        let (rev_by_user, rev_comment, rev_parentid) = {
+            if !has_rev_info {
+                (String::new(), String::new(), evt_oldrevid.to_string())
+            } else {
+                let rev_info = rev_info.unwrap();
+
+                (rev_info.0, rev_info.1, rev_info.2)
+            }
+        };
+
+        let rev_info_msg_user = {
+            if !has_rev_info {
+                String::new()
+            } else {
+                format!(
+                    r#" by <a href="{}">{}</a> ("{}")"#,
+
+                    self.get_user_url(&rev_by_user),
+                    rev_by_user,
+
+                    rev_comment
+                )
+            }
+        };
+
+        let url = format!(
+            "https://psychonautwiki.org/w/index.php?title={}&type=revision&diff={:?}&oldid={}",
+            self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_revid, rev_parentid
+        );
+
+        let msg = format!(
+            r#"[log/approval] <a href="{}">{}</a> approved <a href="{}">revision {}</a>{} of <a href="{}">{}</a>"#,
+
+            self.get_user_url(&user),
+            user,
+
+            self.configured_api.get_short_url(&url),
+            evt_revid,
+
+            rev_info_msg_user,
+
+            self.get_url(&page),
+            page
+        );
+
+        self.configured_api.emit(msg);
+    }
+
+    // Currently “unapprove" will unapprove all approved revisions of
+    // an article and effectively blank it. Therefore the old revision
+    // id will only be used to link to the previously approved revision.
+    fn handle_evt_log_approval_unapprove(&self, evt: &json::JsonValue) {
+        let evt_oldrevid = evt["log_params"]["old_rev_id"].as_u32().unwrap();
+
+        let user = evt["user"].to_string();
+        let page = evt["title"].to_string();
+
+        let rev_info: Option<RevInfo> = get_revision_info(page.clone(), evt_oldrevid.to_string());
+
+        let has_rev_info = rev_info.is_some();
+
+        if !has_rev_info {
+            eprintln!(
+                "Failed to obtain revision information for page='{}', rev_id='{}'",
+
+                page, evt_oldrevid
+            );
+        }
+
+        // extract user and comment from revision data
+        let (rev_by_user, rev_comment) = {
+            if !has_rev_info {
+                (String::new(), String::new())
+            } else {
+                let rev_info = rev_info.unwrap();
+
+                (rev_info.0, rev_info.1)
+            }
+        };
+
+        let rev_info_msg_user = {
+            if !has_rev_info {
+                String::new()
+            } else {
+                format!(
+                    r#" by <a href="{}">{}</a> ("{}")"#,
+
+                    self.get_user_url(&rev_by_user),
+                    rev_by_user,
+
+                    rev_comment
+                )
+            }
+        };
+
+        let url = format!(
+            "https://psychonautwiki.org/w/index.php?title={}&type=revision&oldid={}",
+            self.wrap_urlencode(&MediaWikiEmitter::urlencode(&page)), evt_oldrevid
+        );
+
+        let msg = format!(
+            r#"[log/approval] <a href="{}">{}</a> revoked the approval of <a href="{}">{}</a> (was <a href="{}">revision {}</a>{})"#,
+
+            self.get_user_url(&user),
+            user,
+
+            self.get_url(&page),
+            page,
+
+            self.configured_api.get_short_url(&url),
+            evt_oldrevid,
+
+            rev_info_msg_user
         );
 
         self.configured_api.emit(msg);
@@ -557,10 +725,10 @@ impl MediaWikiEmitter {
                 String::new()
             } else {
                 format!(
-                    " by [{}]({}) (\"{}\")",
+                    r#" by <a href="{}">{}</a> ("{}")"#,
 
-                    rev_by_user,
                     self.get_user_url(&rev_by_user),
+                    rev_by_user,
 
                     rev_comment
                 )
@@ -573,18 +741,18 @@ impl MediaWikiEmitter {
         );
 
         let msg = format!(
-            "`[`log/patrol`]` [{}]({}) marked [revision {}]({}){} of [{}]({}) patrolled",
+            r#"[log/patrol] <a href="{}">{}</a> marked <a href="{}">revision {}</a>{} of <a href="{}">{}</a> patrolled"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
-            evt_curid,
             self.configured_api.get_short_url(&url),
+            evt_curid,
 
             rev_info_msg_user,
 
-            page,
-            self.get_url(&page)
+            self.get_url(&page),
+            page
         );
 
         self.configured_api.emit(msg);
@@ -595,10 +763,10 @@ impl MediaWikiEmitter {
         let user = evt["user"].to_string();
 
         let msg = format!(
-            "`[`log/profile`]` [{}]({}) {}",
+            r#"[log/profile] <a href="{}">{}</a> {}"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
             comment
         );
@@ -611,10 +779,10 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "`[`log/rights`]` [{}]({}) {}",
+            r#"[log/rights] <a href="{}">{}</a> {}"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
             comment
         );
@@ -626,7 +794,7 @@ impl MediaWikiEmitter {
         let comment = evt["log_action_comment"].to_string();
 
         let msg = format!(
-            "`[`log/thanks`]` {}",
+            "[log/thanks] {}",
 
             comment
         );
@@ -639,13 +807,13 @@ impl MediaWikiEmitter {
         let file = evt["title"].to_string();
 
         let msg = format!(
-            "`[`log/upload`]` [{}]({}) uploaded file: [{}]({})",
+            r#"[log/upload] <a href="{}">{}</a> uploaded file: <a href="{}">{}</a>"#,
 
-            user,
             self.get_user_url(&user),
+            user,
 
-            file,
-            self.get_url(&file)
+            self.get_url(&file),
+            file
         );
 
         self.configured_api.emit(msg);
@@ -662,7 +830,7 @@ struct GithubEmitter {
 
 impl GithubEmitter {
     fn new() -> GithubEmitter {
-        let configured_api = ConfiguredApi::new(&"*GitHub*", Some(telegram_bot::types::ParseMode::Html));
+        let configured_api = ConfiguredApi::new(&"<b>GitHub</b>", Some(telegram_bot::types::ParseMode::Html));
 
         GithubEmitter {
             configured_api
@@ -683,7 +851,6 @@ impl GithubEmitter {
                 ));
             },
             afterparty::Event::CommitComment { ref sender, ref comment, ref repository, .. } => {
-                println!("got a comment...");
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> created a comment on <a href="{}">{}</a>"#,
 
