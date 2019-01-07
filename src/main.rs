@@ -330,7 +330,7 @@ impl MediaWikiEmitter {
         let flags = format!(
             "{}{}{}",
 
-            MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor<b> ", ""),
+            MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_patrolled, "<b>patrolled</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_bot, "<b>bot</b> ", "")
         );
@@ -377,7 +377,7 @@ impl MediaWikiEmitter {
         let flags = format!(
             "{}{}{}",
 
-            MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor<b> ", ""),
+            MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_patrolled, "<b>patrolled</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_bot, "<b>bot</b> ", "")
         );
