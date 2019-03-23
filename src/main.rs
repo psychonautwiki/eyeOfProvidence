@@ -1,33 +1,37 @@
-use std::str;
-use std::net::UdpSocket;
+extern crate futures;
+
+extern crate tokio_core;
 
 extern crate telegram_bot;
+use telegram_bot::prelude::*;
+
 extern crate json;
 
-extern crate afterparty;
+extern crate afterparty_ng as afterparty;
 use afterparty::{Delivery, Hub};
 
 extern crate hyper;
-
 use hyper::{Client, Server};
 
-use std::io::Read;
 
 extern crate url;
 use url::percent_encoding::{
     percent_encode, QUERY_ENCODE_SET
 };
 
+extern crate htmlescape;
+
 extern crate regex;
 use regex::Regex;
 
-use std::sync::{Arc, Mutex};
+use std::{
+    io::Read,
+    net::UdpSocket,
+    sync::{Arc, Mutex}
+};
 
 extern crate scoped_threadpool;
 use scoped_threadpool::Pool;
-
-extern crate urlshortener;
-use urlshortener::{Provider, UrlShortener};
 
 #[macro_use]
 extern crate serde_derive;
@@ -160,62 +164,68 @@ impl EmitterRgx {
 
 struct ConfiguredApi {
     api: telegram_bot::Api,
+    core: std::cell::RefCell<tokio_core::reactor::Core>,
     channel_id: i64,
     name: String,
-    parse_mode: Option<telegram_bot::types::ParseMode>,
-    emitter_rgx: EmitterRgx,
-    url_shortener: UrlShortener,
+    parse_mode: telegram_bot::types::ParseMode
+}
+
+fn htmlescape_str<T: Into<String>>(msg: T) -> String {
+    let msg = msg.into();
+    let mut writer = Vec::with_capacity((msg.len()/3 + 1) * 4);
+
+    match htmlescape::encode_minimal_w(&msg, &mut writer) {
+        Err(_) => {
+            println!("Could not html-encode string: {:?}", msg);
+
+            msg
+        },
+        Ok(_) =>
+            match String::from_utf8(writer) {
+                Ok(encoded_msg) => encoded_msg,
+                _ => msg
+            }
+    }
 }
 
 impl ConfiguredApi {
-    fn new(name: &str, parse_mode: Option<telegram_bot::types::ParseMode>) -> ConfiguredApi {
-        let api = telegram_bot::Api::from_env("TELEGRAM_TOKEN").unwrap();
+    fn new(name: &str, parse_mode: telegram_bot::types::ParseMode) -> ConfiguredApi {
+        let core = tokio_core::reactor::Core::new().unwrap();
 
-        let emitter_rgx = EmitterRgx::new();
-        let url_shortener = UrlShortener::new();
+        let token = std::env::var("TELEGRAM_TOKEN").unwrap();
+        let api = telegram_bot::Api::configure(token).build(core.handle()).unwrap();
 
         ConfiguredApi {
             api,
-            emitter_rgx,
-            url_shortener,
+            core: std::cell::RefCell::new(core),
 
             channel_id: -1001050593583,
             name: name.to_string(),
-            parse_mode: parse_mode
+            parse_mode
         }
     }
 
-    fn get_short_url (&self, long_url: &str) -> String {
-        match self.url_shortener.generate(long_url.to_string(), &Provider::IsGd) {
-            Ok(short_url) => short_url,
-            Err(_) => long_url.to_string()
-        }
-    }
+    fn emit<T: Into<String>>(&self, msg: T, should_notify: bool) {
+        let msg = format!("⥂ {} ⟹ {}", self.name, msg.into());
 
-    fn emit<T: Into<String>>(&self, msg: T) {
-        let msg = self.emitter_rgx.plusexclquest_to_url(
-            &format!("⥂ {} ⟹ {}", self.name, msg.into())
+        let channel = telegram_bot::ChannelId::new(self.channel_id);
+
+        let mut chan_msg = channel.text(msg);
+
+        let msg_op = chan_msg
+            .parse_mode(self.parse_mode)
+            .disable_preview();
+
+        let msg_op_notif = match should_notify {
+            true => msg_op,
+            false => msg_op.disable_notification()
+        };
+
+        let tg_future  = self.api.send(
+            msg_op_notif
         );
 
-        let _ = self.api.send_message(
-            /*chat_id*/
-            self.channel_id,
-
-            /*text*/
-            msg,
-
-            /*parse_mode*/
-            self.parse_mode,
-
-            /*disable_web_page_preview*/
-            Some(true),
-
-            /*reply_to_message_id*/
-            None,
-
-            /*reply_markup*/
-            None
-        );
+        let _ = self.core.borrow_mut().run(tg_future);
     }
 }
 
@@ -230,7 +240,7 @@ struct MediaWikiEmitter {
 
 impl MediaWikiEmitter {
     fn new() -> MediaWikiEmitter {
-        let configured_api = ConfiguredApi::new(&"<b>MediaWiki</b>", Some(telegram_bot::types::ParseMode::Html));
+        let configured_api = ConfiguredApi::new(&"<b>MediaWiki</b>", telegram_bot::types::ParseMode::Html);
 
         let emitter_rgx = EmitterRgx::new();
 
@@ -257,7 +267,7 @@ impl MediaWikiEmitter {
                     evt.dump()
                 );
 
-                self.configured_api.emit(msg);
+                self.configured_api.emit(msg, true);
             }
         }
     }
@@ -290,7 +300,7 @@ impl MediaWikiEmitter {
             page
         );
 
-        self.configured_api.get_short_url(&url)
+        url
     }
 
     fn cond_string(cond: bool, protagonist: &str, antagonist: &str) -> String {
@@ -347,13 +357,13 @@ impl MediaWikiEmitter {
             self.get_user_url(&user),
             user,
 
-            self.configured_api.get_short_url(&url),
+            url,
             page,
 
             MediaWikiEmitter::explain_comment(&comment)
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_new(&self, evt: &json::JsonValue) {
@@ -394,13 +404,13 @@ impl MediaWikiEmitter {
             self.get_user_url(&user),
             user,
 
-            self.configured_api.get_short_url(&url),
+            url,
             page,
 
             MediaWikiEmitter::explain_comment(&comment)
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log(&self, evt: &json::JsonValue) {
@@ -428,7 +438,7 @@ impl MediaWikiEmitter {
                     self.emitter_rgx.plusexclquest_to_url(&evt.dump())
                 );
 
-                self.configured_api.emit(msg);
+                self.configured_api.emit(msg, true);
             }
         }
     }
@@ -446,7 +456,7 @@ impl MediaWikiEmitter {
             comment
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_block(&self, evt: &json::JsonValue) {
@@ -462,7 +472,7 @@ impl MediaWikiEmitter {
             comment
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_delete(&self, evt: &json::JsonValue) {
@@ -479,7 +489,7 @@ impl MediaWikiEmitter {
             page
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_move(&self, evt: &json::JsonValue) {
@@ -501,7 +511,7 @@ impl MediaWikiEmitter {
             evt_target
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_newusers(&self, evt: &json::JsonValue) {
@@ -518,7 +528,7 @@ impl MediaWikiEmitter {
             comment
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_approval(&self, evt: &json::JsonValue) {
@@ -537,7 +547,7 @@ impl MediaWikiEmitter {
                     self.emitter_rgx.plusexclquest_to_url(&evt.dump())
                 );
 
-                self.configured_api.emit(msg);
+                self.configured_api.emit(msg, true);
             }
         }
     }
@@ -598,7 +608,7 @@ impl MediaWikiEmitter {
             self.get_user_url(&user),
             user,
 
-            self.configured_api.get_short_url(&url),
+            url,
             evt_revid,
 
             rev_info_msg_user,
@@ -607,7 +617,7 @@ impl MediaWikiEmitter {
             page
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     // Currently “unapprove" will unapprove all approved revisions of
@@ -671,13 +681,13 @@ impl MediaWikiEmitter {
             self.get_url(&page),
             page,
 
-            self.configured_api.get_short_url(&url),
+            url,
             evt_oldrevid,
 
             rev_info_msg_user
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_patrol(&self, evt: &json::JsonValue) {
@@ -746,7 +756,7 @@ impl MediaWikiEmitter {
             self.get_user_url(&user),
             user,
 
-            self.configured_api.get_short_url(&url),
+            url,
             evt_curid,
 
             rev_info_msg_user,
@@ -755,7 +765,7 @@ impl MediaWikiEmitter {
             page
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_profile(&self, evt: &json::JsonValue) {
@@ -771,7 +781,7 @@ impl MediaWikiEmitter {
             comment
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_rights(&self, evt: &json::JsonValue) {
@@ -787,7 +797,7 @@ impl MediaWikiEmitter {
             comment
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_thanks(&self, evt: &json::JsonValue) {
@@ -799,7 +809,7 @@ impl MediaWikiEmitter {
             comment
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 
     fn handle_evt_log_upload(&self, evt: &json::JsonValue) {
@@ -816,7 +826,7 @@ impl MediaWikiEmitter {
             file
         );
 
-        self.configured_api.emit(msg);
+        self.configured_api.emit(msg, true);
     }
 }
 
@@ -830,7 +840,7 @@ struct GithubEmitter {
 
 impl GithubEmitter {
     fn new() -> GithubEmitter {
-        let configured_api = ConfiguredApi::new(&"<b>GitHub</b>", Some(telegram_bot::types::ParseMode::Html));
+        let configured_api = ConfiguredApi::new(&"<b>GitHub</b>", telegram_bot::types::ParseMode::Html);
 
         GithubEmitter {
             configured_api
@@ -841,85 +851,198 @@ impl GithubEmitter {
         match delivery.payload {
             afterparty::Event::Watch { ref sender, ref repository, .. } => {
                 self.configured_api.emit(format!(
-                    r#"<a href="{}">{}</a> started watching <a href="{}>{}</a>"#,
+                    r#"<a href="{}">{}</a> starred <a href="{}">{}</a>"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
-                    self.configured_api.get_short_url(&repository.html_url),
+                    &repository.html_url,
                     repository.full_name,
-                ));
+                ), false);
             },
             afterparty::Event::CommitComment { ref sender, ref comment, ref repository, .. } => {
                 self.configured_api.emit(format!(
-                    r#"<a href="{}">{}</a> created a comment on <a href="{}">{}</a>"#,
+                    r#"<a href="{}">{}</a> commented on commit <a href="{}">{}</a>"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
-                    self.configured_api.get_short_url(&comment.html_url),
+                    &comment.html_url,
 
                     format!(
-                        "{}/{}:{}",
+                        "{}:{}:L{}",
 
                         repository.full_name,
                         comment.path.clone().unwrap_or("".to_string()),
-                        comment.line.clone().unwrap_or("".to_string())
-                    )
-                ));
+                        comment.line.clone().unwrap_or(0i64)
+                    ),
+                ), true);
+            }
+            afterparty::Event::PullRequest { ref sender, ref action, ref repository, ref pull_request, .. } => {
+                // "synchronize" events are less than useless
+                if action == "synchronize" {
+                    return;
+                }
+
+                self.configured_api.emit(format!(
+                    r#"<a href="{}">{}</a> {} pull-request <a href="{}">"{}" (#{})</a> to <a href="{}">{}</a> [<a href="{}">{} commits</a>; <a href="{}">{} changed files (+{}/-{})]</a>; <a href="{}">raw diff</a>]"#,
+
+                    &sender.html_url,
+                    sender.login,
+
+                    action,
+
+                    &pull_request.html_url,
+                    pull_request.title,
+                    pull_request.number,
+
+                    &repository.html_url,
+                    repository.full_name,
+
+                    &format!("{}/commits", &pull_request.html_url),
+                    pull_request.commits,
+
+                    &format!("{}/files", &pull_request.html_url),
+                    pull_request.changed_files,
+
+                    pull_request.additions,
+                    pull_request.deletions,
+
+                    &pull_request.diff_url,
+                ), false);
+            },
+            afterparty::Event::PullRequestReview { ref sender, ref action, ref repository, ref pull_request, ref review, .. } => {
+                if review.state == "edited" {
+                    return;
+                }
+
+                self.configured_api.emit(format!(
+                    r#"<a href="{}">{}</a> {} <a href="{}">{}</a> pull-request <a href="{}">"{}" ({}/#{})</a> [<a href="{}">commits</a>; <a href="{}">changed files</a>; <a href="{}">raw diff</a>]"#,
+
+                    &sender.html_url,
+                    sender.login,
+
+                    action,
+
+                    &review.html_url,
+                    match &*review.state {
+                        // these happen either when an approval is
+                        // created or dismissed
+                        "approved" => "an approval to".to_string(),
+                        "dismissed" => "an approval to".to_string(),
+                        "commented" => "a comment to".to_string(),
+                        "changes_requested" => "a request for changes to".to_string(),
+                        _ => review.state.clone()
+                    },
+
+                    &pull_request.html_url,
+                    pull_request.title,
+
+                    repository.full_name,
+                    pull_request.number,
+
+                    &format!("{}/commits", &pull_request.html_url),
+                    &format!("{}/files", &pull_request.html_url),
+                    &pull_request.diff_url,
+                ), false);
+            },
+            afterparty::Event::Delete { ref sender, ref _ref, ref ref_type, ref repository, .. } => {
+                self.configured_api.emit(format!(
+                    r#"<a href="{}">{}</a> deleted {} "{}" of <a href="{}">{}</a>"#,
+
+                    &sender.html_url,
+                    sender.login,
+
+                    ref_type,
+                    _ref,
+
+                    &repository.html_url,
+                    repository.full_name,
+                ), false);
+            },
+            afterparty::Event::Release { ref sender, ref action, ref release, ref repository, .. } => {
+                self.configured_api.emit(format!(
+                    r#"<a href="{}">{}</a> {} release "{}" (tag {}, branch {}{}{}) of <a href="{}">{}</a>:
+
+{}"#,
+
+                    &sender.html_url,
+                    sender.login,
+
+                    action,
+
+                    release.name.clone().unwrap_or("?".to_string()),
+                    release.tag_name.clone().unwrap_or("?".to_string()),
+                    release.target_commitish,
+
+                    match release.draft {
+                        true => ", draft",
+                        false => "",
+                    },
+
+                    match release.prerelease {
+                        true => ", prerelease",
+                        false => "",
+                    },
+
+                    &repository.html_url,
+                    repository.full_name,
+
+                    htmlescape_str(release.body.clone().unwrap_or("?".to_string()))
+                ), false);
             },
             afterparty::Event::Fork { ref sender, ref repository, ref forkee } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> forked <a href="{}">{}</a> as <a href="{}">{}</a>"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
-                    self.configured_api.get_short_url(&repository.html_url),
+                    &repository.html_url,
                     repository.full_name,
 
-                    self.configured_api.get_short_url(&forkee.html_url),
+                    &forkee.html_url,
                     forkee.full_name,
-                ));
+                ), false);
             },
             afterparty::Event::IssueComment { ref sender, ref action, ref comment, ref issue, ref repository } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} a comment on issue <a href="{}">{}</a> ({:?})"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
                     action,
 
                     {
                         if action == "deleted" {
-                            self.configured_api.get_short_url(&issue.html_url)
+                            &issue.html_url
                         } else {
-                            self.configured_api.get_short_url(&comment.html_url)
+                            &comment.html_url
                         }
                     },
 
                     format!("{}#{}", repository.full_name, issue.number),
 
                     issue.title
-                ));
+                ), true);
             },
-            afterparty::Event::Issues { ref sender, ref action, ref issue, ref repository } => {
+            afterparty::Event::Issues { ref sender, ref action, ref issue, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} issue <a href="{}">{}</a> ({:?})"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
                     action,
 
-                    self.configured_api.get_short_url(&issue.html_url),
+                    &issue.html_url,
                     format!("{}#{}", repository.full_name, issue.number),
 
                     issue.title
-                ));
+                ), true);
             },
-            afterparty::Event::Member { ref sender, ref action, ref member, ref repository } => {
+            afterparty::Event::Member { ref sender, ref action, ref member, ref repository, .. } => {
                 let mut perm_verb = "";
                 let mut perm_suffix = "";
 
@@ -937,25 +1060,25 @@ impl GithubEmitter {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} <a href="{}">{}</a> {} <a href="{}">{}</a>"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
                     perm_verb,
 
-                    self.configured_api.get_short_url(&member.html_url),
+                    &member.html_url,
                     member.login,
 
                     perm_suffix,
 
-                    self.configured_api.get_short_url(&repository.html_url),
+                    &repository.html_url,
                     repository.full_name,
-                ));
+                ), false);
             },
             afterparty::Event::Membership { ref sender, ref action, ref member, ref team, ref organization, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> was {} <a href="{}">{}/{}</a> by <a href="{}">{}</a>"#,
 
-                    self.configured_api.get_short_url(&member.html_url),
+                    &member.html_url,
                     member.login,
 
                     {
@@ -966,50 +1089,63 @@ impl GithubEmitter {
                         }
                     },
 
-                    self.configured_api.get_short_url(&team.members_url),
+                    &team.members_url,
 
                     organization.login,
                     team.name,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
-                ));
+                ), false);
             },
-            afterparty::Event::Push { ref sender, ref commits, ref compare, ref repository, .. } => {
+            afterparty::Event::Push { ref forced, ref sender, ref commits, ref compare, ref repository, ref _ref, .. } => {
                 self.configured_api.emit(format!(
-                    r#"<a href="{}">{}</a> pushed <a href="{}">{} commit{}</a> to <a href="{}">{}</a>{}"#,
+                    r#"<a href="{}">{}</a> {}pushed <a href="{}">{} commit{}</a> to <a href="{}">{}</a> ({}){}"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
-                    self.configured_api.get_short_url(&compare),
+                    { if *forced { "force-" } else { "" } },
+
+                    &compare,
                     commits.len(),
                     { if commits.len() == 1 { "" } else { "s" } },
 
-                    self.configured_api.get_short_url(&repository.html_url),
+                    &repository.html_url,
                     repository.full_name,
+
+                    _ref,
 
                     {
                         if commits.len() == 1 {
-                            format!(": {}", commits[0].message)
+                            format!(
+                                ": {}",
+
+                                // This can potentially trip up the Telegram
+                                // HTML parser. That is, encode the string
+                                // ensuring Git meta data is not incorrectly
+                                // detected as html and thereforce marked
+                                // as invalid markup. i.e. "<foo@bar.com>"
+                                htmlescape_str(commits[0].message.clone())
+                            )
                         } else {
                             "".to_string()
                         }
                     },
-                ));
+                ), true);
             },
             afterparty::Event::Repository { ref sender, ref action, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} repository <a href="{}">{}</a>"#,
 
-                    self.configured_api.get_short_url(&sender.html_url),
+                    &sender.html_url,
                     sender.login,
 
                     action,
 
-                    self.configured_api.get_short_url(&repository.html_url),
+                    &repository.html_url,
                     repository.full_name,
-                ));
+                ), false);
             },
             _ => (),
         }
@@ -1081,7 +1217,7 @@ struct JiraEmitter {
 
 impl JiraEmitter {
     fn new() -> JiraEmitter {
-        let configured_api = ConfiguredApi::new(&"<b>Jira</b>", Some(telegram_bot::types::ParseMode::Html));
+        let configured_api = ConfiguredApi::new(&"<b>Jira</b>", telegram_bot::types::ParseMode::Html);
 
         JiraEmitter {
             configured_api
@@ -1136,7 +1272,8 @@ impl JiraEmitter {
 
     fn _handle_marked_evt(&self, event: JiraEvent, event_type: JiraEventTypes) {
         self.configured_api.emit(
-            self._get_formatted_event(event, event_type)
+            self._get_formatted_event(event, event_type),
+            true
         );
     }
 }
@@ -1188,7 +1325,7 @@ impl EoP {
         loop {
             match socket.recv_from(&mut buf) {
                 Ok((amt, _)) => {
-                    let instr = str::from_utf8(&buf[0..amt]).unwrap_or("");
+                    let instr = std::str::from_utf8(&buf[0..amt]).unwrap_or("");
 
                     let evt = json::parse(instr);
 
@@ -1208,11 +1345,8 @@ impl EoP {
     fn init_github () {
         let mut hub = Hub::new();
 
-        let ge = Arc::new(Mutex::new(GithubEmitter::new()));
-        let gex = ge.clone();
-
         hub.handle("*", move |delivery: &Delivery| {
-            gex.lock().unwrap().handle_evt(delivery);
+            GithubEmitter::new().handle_evt(delivery);
         });
 
         let srvc = match Server::http(GITHUB_ENDPOINT) {
@@ -1228,8 +1362,6 @@ impl EoP {
     }
 
     fn init_jira () {
-        let jira_emitter = Arc::new(Mutex::new(JiraEmitter::new()));
-
         let server = rouille::Server::new(
             JIRA_ENDPOINT,
             move |request| {
@@ -1253,7 +1385,7 @@ impl EoP {
                                 }
                             };
 
-                            jira_emitter.lock().unwrap().handle_evt(data);
+                            JiraEmitter::new().handle_evt(data);
 
                             rouille::Response::json(&r#"{"ok":true}"#)
                         },
