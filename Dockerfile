@@ -1,4 +1,4 @@
-FROM psychonaut/rust-nightly:2019-03-23
+FROM psychonaut/rust-nightly:2019-05-15
 
 ADD . /my-source
 
