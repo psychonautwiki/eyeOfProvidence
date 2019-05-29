@@ -13,6 +13,8 @@ use afterparty::{Delivery, Hub};
 extern crate hyper;
 use hyper::{Client, Server};
 
+use hyper::net::HttpsConnector;
+use hyper_native_tls::NativeTlsClient;
 
 extern crate url;
 use url::percent_encoding::{
@@ -37,6 +39,7 @@ use scoped_threadpool::Pool;
 extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
+extern crate serde_qs;
 
 #[macro_use]
 extern crate rouille;
@@ -44,8 +47,45 @@ extern crate rouille;
 const MEDIAWIKI_ENDPOINT: &'static str = "0.0.0.0:3000";
 const GITHUB_ENDPOINT: &'static str = "0.0.0.0:4567";
 const JIRA_ENDPOINT: &'static str = "0.0.0.0:9293";
+const PAYPAL_ENDPOINT: &'static str = "0.0.0.0:9728";
 
 const PW_API_URL_PREFIX: &'static str = "https://psychonautwiki.org/w/api.php";
+
+// SANDBOX
+//const PAYPAL_IPN_VERIFY_URL: &'static str = "https://ipnpb.sandbox.paypal.com/cgi-bin/webscr?cmd=_notify-validate&";
+// LIVE
+const PAYPAL_IPN_VERIFY_URL: &'static str = "https://ipnpb.paypal.com/cgi-bin/webscr?cmd=_notify-validate&";
+
+fn verify_paypal_ipn (ipn_payload: impl Into<String>) -> bool {
+    let ssl = NativeTlsClient::new().unwrap();
+    let connector = HttpsConnector::new(ssl);
+
+    let client = Client::with_connector(connector);
+
+    let url = format!("{}{}", PAYPAL_IPN_VERIFY_URL, ipn_payload.into());
+
+    let res = client.get(
+        &url
+    ).send();
+
+    if !res.is_ok() {
+        res.map_err(|err| println!("{:?}", err));
+        return false;
+    }
+
+    let mut res = res.unwrap();
+
+    let mut buf = Vec::new();
+
+    match res.read_to_end(&mut buf) {
+        Ok(_) => {},
+        _ => {
+            return false;
+        }
+    }
+
+    &buf == b"VERIFIED"
+}
 
 fn legacy_hyper_load_url (url: String) -> Option<json::JsonValue> {
     let client = Client::new();
@@ -1233,7 +1273,7 @@ impl JiraEmitter {
         };
 
         self._handle_marked_evt(
-            event, 
+            event,
             event_type
         )
     }
@@ -1278,6 +1318,83 @@ impl JiraEmitter {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct PayPalIPN {
+    mc_gross: String,
+    protection_eligibility: String,
+    payer_id: String,
+    payment_date: String,
+    payment_status: String,
+    charset: String,
+    first_name: String,
+    mc_fee: String,
+    notify_version: String,
+    custom: String,
+    payer_status: String,
+    business: String,
+    quantity: String,
+    verify_sign: String,
+    payer_email: String,
+    txn_id: String,
+    payment_type: String,
+    payer_business_name: String,
+    last_name: String,
+    receiver_email: String,
+    payment_fee: String,
+    shipping_discount: String,
+    receiver_id: String,
+    insurance_amount: String,
+    txn_type: String,
+    item_name: String,
+    discount: String,
+    mc_currency: String,
+    item_number: String,
+    residence_country: String,
+    test_ipn: String,
+    shipping_method: String,
+    transaction_subject: String,
+    payment_gross: String,
+    ipn_track_id: String,
+}
+
+struct PayPalEmitter {
+    configured_api: ConfiguredApi
+}
+
+impl PayPalEmitter {
+    fn new() -> PayPalEmitter {
+        let configured_api = ConfiguredApi::new(&"<b>PayPal</b>", telegram_bot::types::ParseMode::Html);
+
+        PayPalEmitter {
+            configured_api
+        }
+    }
+
+    fn handle_evt(&self, event: &PayPalIPN) {
+        self.configured_api.emit(
+            self._get_formatted_event(event),
+            true
+        );
+    }
+
+    fn _get_formatted_event(&self, event: &PayPalIPN) -> String {
+        format!(
+            r#"Received <b>{} {}</b> (fee <b>{} {}</b>, gr. <b>{} {}</b>) from <b>{} {}</b> [<b>{}, {}, {}</b>]"#,
+            event.mc_currency,
+            event.mc_gross.parse::<f64>().unwrap() - event.mc_fee.parse::<f64>().unwrap(),
+            event.mc_currency,
+            event.mc_fee.parse::<f64>().unwrap(),
+            event.mc_currency,
+            event.mc_gross.parse::<f64>().unwrap(),
+            event.first_name,
+            event.last_name,
+            if event.payer_status == "verified" { "✓" } else { "✘" },
+            event.residence_country,
+            event.payer_email
+        )
+    }
+}
+
 /*
  * Main
  */
@@ -1289,7 +1406,7 @@ struct EoP {
 impl EoP {
     fn new() -> EoP {
         EoP {
-            thread_pool: Pool::new(3)
+            thread_pool: Pool::new(4)
         }
     }
 
@@ -1300,11 +1417,15 @@ impl EoP {
             });
 
             scoped.execute(|| {
-               EoP::init_github();
+                EoP::init_github();
             });
 
             scoped.execute(|| {
-               EoP::init_jira();
+                EoP::init_jira();
+            });
+
+            scoped.execute(|| {
+                EoP::init_paypal();
             });
         });
     }
@@ -1404,6 +1525,52 @@ impl EoP {
             },
             Err(msg) => {
                 println!("✘ JiraEmitter failed to create socket: {:?}", msg);
+            }
+        }
+    }
+
+    fn init_paypal () {
+        let server = rouille::Server::new(
+            PAYPAL_ENDPOINT,
+            move |request| {
+                rouille::log(&request, std::io::stdout(), || {
+                    router!(request,
+                        (POST) (/) => {
+                            let mut res_data = request.data()
+                                                      .expect("?");
+                            let mut buf = Vec::new();
+
+                            match res_data.read_to_end(&mut buf) {
+                                Ok(_) => (),
+                                Err(err) => return rouille::Response::json(&r#"{"ok":false}"#)
+                            };
+
+                            verify_paypal_ipn(String::from_utf8(buf.clone()).unwrap());
+
+                            let data: PayPalIPN = match serde_qs::from_str(&*String::from_utf8_lossy(&buf)) {
+                                Ok(parsed_data) => parsed_data,
+                                Err(err) => return rouille::Response::json(&r#"{"ok":false}"#)
+                            };
+
+                            PayPalEmitter::new().handle_evt(&data);
+
+                            rouille::Response::json(&r#"{"ok":true}"#)
+                        },
+
+                        _ => rouille::Response::json(&r#"{"ok":false}"#)
+                    )
+                })
+            }
+        );
+
+        match server {
+            Ok(server) => {
+                println!("✔ PayPalEmitter online. ({})", JIRA_ENDPOINT);
+
+                server.run();
+            },
+            Err(msg) => {
+                println!("✘ PayPalEmitter failed to create socket: {:?}", msg);
             }
         }
     }
