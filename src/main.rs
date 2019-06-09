@@ -18,7 +18,7 @@ use hyper_native_tls::NativeTlsClient;
 
 extern crate url;
 use url::percent_encoding::{
-    percent_encode, QUERY_ENCODE_SET
+    percent_encode, percent_decode, QUERY_ENCODE_SET
 };
 
 extern crate htmlescape;
@@ -28,8 +28,7 @@ use regex::Regex;
 
 use std::{
     io::Read,
-    net::UdpSocket,
-    sync::{Arc, Mutex}
+    net::UdpSocket
 };
 
 extern crate scoped_threadpool;
@@ -69,7 +68,7 @@ fn verify_paypal_ipn (ipn_payload: impl Into<String>) -> bool {
     ).send();
 
     if !res.is_ok() {
-        res.map_err(|err| println!("{:?}", err));
+        let _ = res.map_err(|err| println!("{:?}", err));
         return false;
     }
 
@@ -183,10 +182,10 @@ impl EmitterRgx {
         let questionmark_rgx = Regex::new(r"\?").unwrap();
 
         EmitterRgx {
-            percent_rgx: percent_rgx,
-            plus_rgx: plus_rgx,
-            and_rgx: and_rgx,
-            questionmark_rgx: questionmark_rgx,
+            percent_rgx,
+            plus_rgx,
+            and_rgx,
+            questionmark_rgx,
         }
     }
 
@@ -314,6 +313,12 @@ impl MediaWikiEmitter {
 
     fn urlencode(orig: &str) -> String {
         percent_encode(orig.as_bytes(), QUERY_ENCODE_SET).collect::<String>()
+    }
+
+    fn urldecode(orig: &str) -> String {
+        String::from_utf8(
+            percent_decode(orig.as_bytes()).collect::<Vec<u8>>()
+        ).unwrap_or("<string conversion failed>".to_string())
     }
 
     // do an additional encode on top of urlencode
@@ -468,6 +473,7 @@ impl MediaWikiEmitter {
             "rights" => self.handle_evt_log_rights(evt),
             "thanks" => self.handle_evt_log_thanks(evt),
             "upload" => self.handle_evt_log_upload(evt),
+            "usermerge" => self.handle_evt_log_usermerge(evt),
             _ => {
                 if log_type == "null" {
                     return;
@@ -864,6 +870,21 @@ impl MediaWikiEmitter {
 
             self.get_url(&file),
             file
+        );
+
+        self.configured_api.emit(msg, true);
+    }
+
+    fn handle_evt_log_usermerge(&self, evt: &json::JsonValue) {
+        let user = evt["user"].to_string();
+
+        let msg = format!(
+            r#"[log/usermerge] <a href="{}">{}</a> {}"#,
+
+            self.get_user_url(&user),
+            user,
+
+            MediaWikiEmitter::urldecode(&evt["log_action_comment"].to_string()),
         );
 
         self.configured_api.emit(msg, true);
@@ -1540,14 +1561,14 @@ impl EoP {
 
                             match res_data.read_to_end(&mut buf) {
                                 Ok(_) => (),
-                                Err(err) => return rouille::Response::json(&r#"{"ok":false}"#)
+                                Err(_) => return rouille::Response::json(&r#"{"ok":false}"#)
                             };
 
                             verify_paypal_ipn(String::from_utf8(buf.clone()).unwrap());
 
                             let data: PayPalIPN = match serde_qs::from_str(&*String::from_utf8_lossy(&buf)) {
                                 Ok(parsed_data) => parsed_data,
-                                Err(err) => return rouille::Response::json(&r#"{"ok":false}"#)
+                                Err(_) => return rouille::Response::json(&r#"{"ok":false}"#)
                             };
 
                             PayPalEmitter::new().handle_evt(&data);
