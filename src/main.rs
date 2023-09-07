@@ -1,47 +1,37 @@
-extern crate futures;
-
-extern crate tokio_core;
-
-extern crate telegram_bot;
-use telegram_bot::prelude::*;
-
-extern crate json;
-
 extern crate afterparty_ng as afterparty;
-use afterparty::{Delivery, Hub};
-
-extern crate hyper;
-use hyper::{Client, Server};
-
-use hyper::net::HttpsConnector;
-use hyper_native_tls::NativeTlsClient;
-
-extern crate url;
-use url::percent_encoding::{
-    percent_encode, percent_decode, QUERY_ENCODE_SET
-};
-
+extern crate futures;
 extern crate htmlescape;
-
+extern crate hyper;
+extern crate json;
 extern crate regex;
-use regex::Regex;
+#[macro_use]
+extern crate rouille;
+extern crate scoped_threadpool;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+extern crate serde_qs;
+extern crate telegram_bot;
+extern crate tokio_core;
+extern crate url;
 
 use std::{
     io::Read,
-    net::UdpSocket
+    net::UdpSocket,
 };
 
-extern crate scoped_threadpool;
+use afterparty::{Delivery, Hub};
+use hyper::{Client, Server};
+use hyper::net::HttpsConnector;
+use hyper_native_tls::NativeTlsClient;
+use regex::Regex;
 use scoped_threadpool::Pool;
+use telegram_bot::prelude::*;
+use url::percent_encoding::{
+    percent_decode, percent_encode, QUERY_ENCODE_SET,
+};
 
-#[macro_use]
-extern crate serde_derive;
-extern crate serde;
-extern crate serde_json;
-extern crate serde_qs;
-
-#[macro_use]
-extern crate rouille;
 
 const MEDIAWIKI_ENDPOINT: &'static str = "0.0.0.0:3000";
 const GITHUB_ENDPOINT: &'static str = "0.0.0.0:4567";
@@ -55,7 +45,7 @@ const PW_API_URL_PREFIX: &'static str = "https://psychonautwiki.org/w/api.php";
 // LIVE
 const PAYPAL_IPN_VERIFY_URL: &'static str = "https://ipnpb.paypal.com/cgi-bin/webscr?cmd=_notify-validate&";
 
-fn verify_paypal_ipn (ipn_payload: impl Into<String>) -> bool {
+fn verify_paypal_ipn(ipn_payload: impl Into<String>) -> bool {
     let ssl = NativeTlsClient::new().unwrap();
     let connector = HttpsConnector::new(ssl);
 
@@ -77,7 +67,7 @@ fn verify_paypal_ipn (ipn_payload: impl Into<String>) -> bool {
     let mut buf = Vec::new();
 
     match res.read_to_end(&mut buf) {
-        Ok(_) => {},
+        Ok(_) => {}
         _ => {
             return false;
         }
@@ -86,7 +76,7 @@ fn verify_paypal_ipn (ipn_payload: impl Into<String>) -> bool {
     &buf == b"VERIFIED"
 }
 
-fn legacy_hyper_load_url (url: String) -> Option<json::JsonValue> {
+fn legacy_hyper_load_url(url: String) -> Option<json::JsonValue> {
     let client = Client::new();
 
     let res = client.get(&url).send();
@@ -100,7 +90,7 @@ fn legacy_hyper_load_url (url: String) -> Option<json::JsonValue> {
     let mut buf = String::new();
 
     match res.read_to_string(&mut buf) {
-        Ok(_) => {},
+        Ok(_) => {}
         _ => {
             return None;
         }
@@ -113,7 +103,7 @@ fn legacy_hyper_load_url (url: String) -> Option<json::JsonValue> {
 }
 
 #[derive(Debug)]
-struct RevInfo (String, String, String);
+struct RevInfo(String, String, String);
 
 fn get_revision_info(title: String, rev_id: String) -> Option<RevInfo> {
     let title = title;
@@ -121,7 +111,6 @@ fn get_revision_info(title: String, rev_id: String) -> Option<RevInfo> {
 
     let url = format!(
         "{}?action=query&prop=revisions&titles={}&rvprop=timestamp%7Cuser%7Ccomment%7Ccontent%7Cids&rvstartid={}&rvendid={}&format=json",
-
         PW_API_URL_PREFIX,
         title,
         rev_id,
@@ -162,7 +151,7 @@ fn get_revision_info(title: String, rev_id: String) -> Option<RevInfo> {
         RevInfo(
             results["user"].to_string(),
             results["comment"].to_string(),
-            results["parentid"].to_string()
+            results["parentid"].to_string(),
         )
     )
 }
@@ -206,19 +195,19 @@ struct ConfiguredApi {
     core: std::cell::RefCell<tokio_core::reactor::Core>,
     channel_id: i64,
     name: String,
-    parse_mode: telegram_bot::types::ParseMode
+    parse_mode: telegram_bot::types::ParseMode,
 }
 
 fn htmlescape_str<T: Into<String>>(msg: T) -> String {
     let msg = msg.into();
-    let mut writer = Vec::with_capacity((msg.len()/3 + 1) * 4);
+    let mut writer = Vec::with_capacity((msg.len() / 3 + 1) * 4);
 
     match htmlescape::encode_minimal_w(&msg, &mut writer) {
         Err(_) => {
             println!("Could not html-encode string: {:?}", msg);
 
             msg
-        },
+        }
         Ok(_) =>
             match String::from_utf8(writer) {
                 Ok(encoded_msg) => encoded_msg,
@@ -240,7 +229,7 @@ impl ConfiguredApi {
 
             channel_id: -1001050593583,
             name: name.to_string(),
-            parse_mode
+            parse_mode,
         }
     }
 
@@ -260,7 +249,7 @@ impl ConfiguredApi {
             false => msg_op.disable_notification()
         };
 
-        let tg_future  = self.api.send(
+        let tg_future = self.api.send(
             msg_op_notif
         );
 
@@ -274,7 +263,7 @@ impl ConfiguredApi {
 
 struct MediaWikiEmitter {
     configured_api: ConfiguredApi,
-    emitter_rgx: EmitterRgx
+    emitter_rgx: EmitterRgx,
 }
 
 impl MediaWikiEmitter {
@@ -285,12 +274,14 @@ impl MediaWikiEmitter {
 
         MediaWikiEmitter {
             configured_api,
-            emitter_rgx
+            emitter_rgx,
         }
     }
 
     fn handle_evt(&self, evt: &json::JsonValue) {
         let evt_type = evt["type"].to_string();
+
+        dbg!(&evt.dump());
 
         match &*evt_type {
             "edit" => self.handle_evt_edit(evt),
@@ -331,7 +322,6 @@ impl MediaWikiEmitter {
     fn get_user_url(&self, user: &str) -> String {
         let target = format!(
             "User:{}",
-
             user
         );
 
@@ -341,7 +331,6 @@ impl MediaWikiEmitter {
     fn get_url(&self, page: &str) -> String {
         let url = format!(
             "https://psychonautwiki.org/wiki/{}",
-
             page
         );
 
@@ -384,7 +373,6 @@ impl MediaWikiEmitter {
 
         let flags = format!(
             "{}{}{}",
-
             MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_patrolled, "<b>patrolled</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_bot, "<b>bot</b> ", "")
@@ -392,19 +380,15 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"{}<a href="{}">{}</a> edited <a href="{}">{}</a> {}"#,
-
             MediaWikiEmitter::cond_string(
                 has_flags,
                 &format!("| {}| ", flags),
-                ""
+                "",
             ),
-
             self.get_user_url(&user),
             user,
-
             url,
             page,
-
             MediaWikiEmitter::explain_comment(&comment)
         );
 
@@ -431,7 +415,6 @@ impl MediaWikiEmitter {
 
         let flags = format!(
             "{}{}{}",
-
             MediaWikiEmitter::cond_string(evt_is_minor, "<b>minor</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_patrolled, "<b>patrolled</b> ", ""),
             MediaWikiEmitter::cond_string(evt_is_bot, "<b>bot</b> ", "")
@@ -439,19 +422,15 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[new] {}<a href="{}">{}</a> created page <a href="{}">{}</a> {}"#,
-
             MediaWikiEmitter::cond_string(
                 has_flags,
                 &format!("| {}| ", flags),
-                ""
+                "",
             ),
-
             self.get_user_url(&user),
             user,
-
             url,
             page,
-
             MediaWikiEmitter::explain_comment(&comment)
         );
 
@@ -459,6 +438,8 @@ impl MediaWikiEmitter {
     }
 
     fn handle_evt_log(&self, evt: &json::JsonValue) {
+        ;
+
         let log_type = evt["log_type"].to_string();
 
         match &*log_type {
@@ -495,10 +476,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/avatar] <a href="{}">{}</a> {}"#,
-
             self.get_user_url(&user),
             user,
-
             comment
         );
 
@@ -511,10 +490,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/ban] <a href="{}">{}</a> {}"#,
-
             self.get_user_url(&user),
             user,
-
             comment
         );
 
@@ -527,10 +504,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/delete] <a href="{}">{}</a> deleted page: <a href="{}">{}</a>"#,
-
             self.get_user_url(&user),
             user,
-
             self.get_url(&page),
             page
         );
@@ -546,13 +521,10 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/move] <a href="{}">{}</a> moved <a href="{}">{}</a> to <a href="{}">{}</a>"#,
-
             self.get_user_url(&user),
             user,
-
             self.get_url(&page),
             page,
-
             self.get_url(&evt_target),
             evt_target
         );
@@ -567,10 +539,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/newusers] <a href="{}">{}</a> {}"#,
-
             self.get_user_url(&user),
             user,
-
             comment
         );
 
@@ -599,8 +569,36 @@ impl MediaWikiEmitter {
     }
 
     fn handle_evt_log_approval_approve(&self, evt: &json::JsonValue) {
-        let evt_revid = evt["log_params"]["rev_id"].as_u32().unwrap();
-        let evt_oldrevid = evt["log_params"]["old_rev_id"].as_u32().unwrap();
+        let params: Option<(String, Option<String>, Option<String>)> = serde_json::from_str(&evt["log_params"].dump()).ok();
+
+        // parse second and third value of params as revid and oldrevid respectively
+        // if not present, set both to None
+        let (evt_revid, evt_oldrevid) = {
+            if !params.is_some() {
+                (None, None)
+            } else {
+                let params = params.unwrap();
+
+                // parse to u32
+
+                let evt_revid = params.1.map(|x| x.parse::<u32>().ok()).flatten();
+                let evt_oldrevid = params.2.map(|x| x.parse::<u32>().ok()).flatten();
+
+                (evt_revid, evt_oldrevid)
+            }
+        };
+
+        if evt_revid.is_none() || evt_oldrevid.is_none() {
+            eprintln!(
+                "Failed to obtain revision information for page='{}', rev_id='{:?}', old_rev_id='{:?}' [either rev_id or old_rev_id is missing]",
+                evt["title"].to_string(), evt_revid, evt_oldrevid
+            );
+
+            return;
+        }
+
+        let evt_revid = evt_revid.unwrap();
+        let evt_oldrevid = evt_oldrevid.unwrap();
 
         let user = evt["user"].to_string();
         let page = evt["title"].to_string();
@@ -612,7 +610,6 @@ impl MediaWikiEmitter {
         if !has_rev_info {
             eprintln!(
                 "Failed to obtain revision information for page='{}', rev_id='{}'",
-
                 page, evt_revid
             );
         }
@@ -634,10 +631,8 @@ impl MediaWikiEmitter {
             } else {
                 format!(
                     r#" by <a href="{}">{}</a> ("{}")"#,
-
                     self.get_user_url(&rev_by_user),
                     rev_by_user,
-
                     rev_comment
                 )
             }
@@ -650,15 +645,11 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/approval] <a href="{}">{}</a> approved <a href="{}">revision {}</a>{} of <a href="{}">{}</a>"#,
-
             self.get_user_url(&user),
             user,
-
             url,
             evt_revid,
-
             rev_info_msg_user,
-
             self.get_url(&page),
             page
         );
@@ -682,7 +673,6 @@ impl MediaWikiEmitter {
         if !has_rev_info {
             eprintln!(
                 "Failed to obtain revision information for page='{}', rev_id='{}'",
-
                 page, evt_oldrevid
             );
         }
@@ -704,10 +694,8 @@ impl MediaWikiEmitter {
             } else {
                 format!(
                     r#" by <a href="{}">{}</a> ("{}")"#,
-
                     self.get_user_url(&rev_by_user),
                     rev_by_user,
-
                     rev_comment
                 )
             }
@@ -720,16 +708,12 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/approval] <a href="{}">{}</a> revoked the approval of <a href="{}">{}</a> (was <a href="{}">revision {}</a>{})"#,
-
             self.get_user_url(&user),
             user,
-
             self.get_url(&page),
             page,
-
             url,
             evt_oldrevid,
-
             rev_info_msg_user
         );
 
@@ -760,7 +744,6 @@ impl MediaWikiEmitter {
         if !has_rev_info {
             eprintln!(
                 "Failed to obtain revision information for page='{}', rev_id='{}'",
-
                 page, evt_curid
             );
         }
@@ -782,10 +765,8 @@ impl MediaWikiEmitter {
             } else {
                 format!(
                     r#" by <a href="{}">{}</a> ("{}")"#,
-
                     self.get_user_url(&rev_by_user),
                     rev_by_user,
-
                     rev_comment
                 )
             }
@@ -798,15 +779,11 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/patrol] <a href="{}">{}</a> marked <a href="{}">revision {}</a>{} of <a href="{}">{}</a> patrolled"#,
-
             self.get_user_url(&user),
             user,
-
             url,
             evt_curid,
-
             rev_info_msg_user,
-
             self.get_url(&page),
             page
         );
@@ -820,10 +797,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/profile] <a href="{}">{}</a> {}"#,
-
             self.get_user_url(&user),
             user,
-
             comment
         );
 
@@ -836,10 +811,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/rights] <a href="{}">{}</a> {}"#,
-
             self.get_user_url(&user),
             user,
-
             comment
         );
 
@@ -851,7 +824,6 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             "[log/thanks] {}",
-
             comment
         );
 
@@ -864,10 +836,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/upload] <a href="{}">{}</a> uploaded file: <a href="{}">{}</a>"#,
-
             self.get_user_url(&user),
             user,
-
             self.get_url(&file),
             file
         );
@@ -880,10 +850,8 @@ impl MediaWikiEmitter {
 
         let msg = format!(
             r#"[log/usermerge] <a href="{}">{}</a> {}"#,
-
             self.get_user_url(&user),
             user,
-
             MediaWikiEmitter::urldecode(&evt["log_action_comment"].to_string()),
         );
 
@@ -896,7 +864,7 @@ impl MediaWikiEmitter {
  */
 
 struct GithubEmitter {
-    configured_api: ConfiguredApi
+    configured_api: ConfiguredApi,
 }
 
 impl GithubEmitter {
@@ -908,31 +876,25 @@ impl GithubEmitter {
         }
     }
 
-    fn handle_evt (&self, delivery: &Delivery) {
+    fn handle_evt(&self, delivery: &Delivery) {
         match delivery.payload {
             afterparty::Event::Watch { ref sender, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> starred <a href="{}">{}</a>"#,
-
                     &sender.html_url,
                     sender.login,
-
                     &repository.html_url,
                     repository.full_name,
                 ), false);
-            },
+            }
             afterparty::Event::CommitComment { ref sender, ref comment, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> commented on commit <a href="{}">{}</a>"#,
-
                     &sender.html_url,
                     sender.login,
-
                     &comment.html_url,
-
                     format!(
                         "{}:{}:L{}",
-
                         repository.full_name,
                         comment.path.clone().unwrap_or("".to_string()),
                         comment.line.clone().unwrap_or(0i64)
@@ -947,31 +909,23 @@ impl GithubEmitter {
 
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} pull-request <a href="{}">"{}" (#{})</a> to <a href="{}">{}</a> [<a href="{}">{} commits</a>; <a href="{}">{} changed files (+{}/-{})]</a>; <a href="{}">raw diff</a>]"#,
-
                     &sender.html_url,
                     sender.login,
-
                     action,
-
                     &pull_request.html_url,
                     pull_request.title,
                     pull_request.number,
-
                     &repository.html_url,
                     repository.full_name,
-
                     &format!("{}/commits", &pull_request.html_url),
                     pull_request.commits,
-
                     &format!("{}/files", &pull_request.html_url),
                     pull_request.changed_files,
-
                     pull_request.additions,
                     pull_request.deletions,
-
                     &pull_request.diff_url,
                 ), false);
-            },
+            }
             afterparty::Event::PullRequestReview { ref sender, ref action, ref repository, ref pull_request, ref review, .. } => {
                 if review.state == "edited" {
                     return;
@@ -979,12 +933,9 @@ impl GithubEmitter {
 
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} <a href="{}">{}</a> pull-request <a href="{}">"{}" ({}/#{})</a> [<a href="{}">commits</a>; <a href="{}">changed files</a>; <a href="{}">raw diff</a>]"#,
-
                     &sender.html_url,
                     sender.login,
-
                     action,
-
                     &review.html_url,
                     match &*review.state {
                         // these happen either when an approval is
@@ -995,86 +946,67 @@ impl GithubEmitter {
                         "changes_requested" => "a request for changes to".to_string(),
                         _ => review.state.clone()
                     },
-
                     &pull_request.html_url,
                     pull_request.title,
-
                     repository.full_name,
                     pull_request.number,
-
                     &format!("{}/commits", &pull_request.html_url),
                     &format!("{}/files", &pull_request.html_url),
                     &pull_request.diff_url,
                 ), false);
-            },
+            }
             afterparty::Event::Delete { ref sender, ref _ref, ref ref_type, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> deleted {} "{}" of <a href="{}">{}</a>"#,
-
                     &sender.html_url,
                     sender.login,
-
                     ref_type,
                     _ref,
-
                     &repository.html_url,
                     repository.full_name,
                 ), false);
-            },
+            }
             afterparty::Event::Release { ref sender, ref action, ref release, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} release "{}" (tag {}, branch {}{}{}) of <a href="{}">{}</a>:
 
 {}"#,
-
                     &sender.html_url,
                     sender.login,
-
                     action,
-
                     release.name.clone().unwrap_or("?".to_string()),
                     release.tag_name.clone().unwrap_or("?".to_string()),
                     release.target_commitish,
-
                     match release.draft {
                         true => ", draft",
                         false => "",
                     },
-
                     match release.prerelease {
                         true => ", prerelease",
                         false => "",
                     },
-
                     &repository.html_url,
                     repository.full_name,
-
                     htmlescape_str(release.body.clone().unwrap_or("?".to_string()))
                 ), false);
-            },
+            }
             afterparty::Event::Fork { ref sender, ref repository, ref forkee } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> forked <a href="{}">{}</a> as <a href="{}">{}</a>"#,
-
                     &sender.html_url,
                     sender.login,
-
                     &repository.html_url,
                     repository.full_name,
-
                     &forkee.html_url,
                     forkee.full_name,
                 ), false);
-            },
+            }
             afterparty::Event::IssueComment { ref sender, ref action, ref comment, ref issue, ref repository } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} a comment on issue <a href="{}">{}</a> ({:?})"#,
-
                     &sender.html_url,
                     sender.login,
-
                     action,
-
                     {
                         if action == "deleted" {
                             &issue.html_url
@@ -1082,27 +1014,21 @@ impl GithubEmitter {
                             &comment.html_url
                         }
                     },
-
                     format!("{}#{}", repository.full_name, issue.number),
-
                     issue.title
                 ), true);
-            },
+            }
             afterparty::Event::Issues { ref sender, ref action, ref issue, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} issue <a href="{}">{}</a> ({:?})"#,
-
                     &sender.html_url,
                     sender.login,
-
                     action,
-
                     &issue.html_url,
                     format!("{}#{}", repository.full_name, issue.number),
-
                     issue.title
                 ), true);
-            },
+            }
             afterparty::Event::Member { ref sender, ref action, ref member, ref repository, .. } => {
                 let mut perm_verb = "";
                 let mut perm_suffix = "";
@@ -1120,28 +1046,21 @@ impl GithubEmitter {
 
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} <a href="{}">{}</a> {} <a href="{}">{}</a>"#,
-
                     &sender.html_url,
                     sender.login,
-
                     perm_verb,
-
                     &member.html_url,
                     member.login,
-
                     perm_suffix,
-
                     &repository.html_url,
                     repository.full_name,
                 ), false);
-            },
+            }
             afterparty::Event::Membership { ref sender, ref action, ref member, ref team, ref organization, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> was {} <a href="{}">{}/{}</a> by <a href="{}">{}</a>"#,
-
                     &member.html_url,
                     member.login,
-
                     {
                         if action == "added" {
                             "added to"
@@ -1149,34 +1068,25 @@ impl GithubEmitter {
                             "removed from"
                         }
                     },
-
                     &team.members_url,
-
                     organization.login,
                     team.name,
-
                     &sender.html_url,
                     sender.login,
                 ), false);
-            },
+            }
             afterparty::Event::Push { ref forced, ref sender, ref commits, ref compare, ref repository, ref _ref, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {}pushed <a href="{}">{} commit{}</a> to <a href="{}">{}</a> ({}){}"#,
-
                     &sender.html_url,
                     sender.login,
-
                     { if *forced { "force-" } else { "" } },
-
                     &compare,
                     commits.len(),
                     { if commits.len() == 1 { "" } else { "s" } },
-
                     &repository.html_url,
                     repository.full_name,
-
                     _ref,
-
                     {
                         if commits.len() == 1 {
                             format!(
@@ -1194,20 +1104,17 @@ impl GithubEmitter {
                         }
                     },
                 ), true);
-            },
+            }
             afterparty::Event::Repository { ref sender, ref action, ref repository, .. } => {
                 self.configured_api.emit(format!(
                     r#"<a href="{}">{}</a> {} repository <a href="{}">{}</a>"#,
-
                     &sender.html_url,
                     sender.login,
-
                     action,
-
                     &repository.html_url,
                     repository.full_name,
                 ), false);
-            },
+            }
             _ => (),
         }
     }
@@ -1221,59 +1128,59 @@ impl GithubEmitter {
 
 #[derive(Serialize, Deserialize)]
 struct JiraEventFields {
-  issuetype: JiraEventIssuetype,
-  project: JiraEventIssuetype,
-  priority: JiraEventIssuetype,
-  status: JiraEventStatus,
-  summary: String,
-  creator: JiraEventUser,
-  reporter: JiraEventUser,
+    issuetype: JiraEventIssuetype,
+    project: JiraEventIssuetype,
+    priority: JiraEventIssuetype,
+    status: JiraEventStatus,
+    summary: String,
+    creator: JiraEventUser,
+    reporter: JiraEventUser,
 }
 
 #[derive(Serialize, Deserialize)]
 struct JiraEventIssue {
-  #[serde(rename = "self")]
-  _self: String,
-  key: String,
-  fields: JiraEventFields,
+    #[serde(rename = "self")]
+    _self: String,
+    key: String,
+    fields: JiraEventFields,
 }
 
 #[derive(Serialize, Deserialize)]
 struct JiraEventIssuetype {
-  name: String,
+    name: String,
 }
 
 #[derive(Serialize, Deserialize)]
 struct JiraEventStatus {
-  name: String,
-  #[serde(rename = "statusCategory")]
-  status_category: JiraEventIssuetype,
+    name: String,
+    #[serde(rename = "statusCategory")]
+    status_category: JiraEventIssuetype,
 }
 
 #[derive(Serialize, Deserialize)]
 struct JiraEventUser {
-  #[serde(rename = "accountId")]
-  account_id: String,
-  #[serde(rename = "displayName")]
-  display_name: String,
+    #[serde(rename = "accountId")]
+    account_id: String,
+    #[serde(rename = "displayName")]
+    display_name: String,
 }
 
 #[derive(Serialize, Deserialize)]
 struct JiraEvent<'a> {
-  user: JiraEventUser,
-  issue: JiraEventIssue,
-  #[serde(rename = "webhookEvent")]
-  webhook_event: &'a str,
+    user: JiraEventUser,
+    issue: JiraEventIssue,
+    #[serde(rename = "webhookEvent")]
+    webhook_event: &'a str,
 }
 
 enum JiraEventTypes {
     IssueCreated,
     IssueUpdated,
-    IssueDeleted
+    IssueDeleted,
 }
 
 struct JiraEmitter {
-    configured_api: ConfiguredApi
+    configured_api: ConfiguredApi,
 }
 
 impl JiraEmitter {
@@ -1295,7 +1202,7 @@ impl JiraEmitter {
 
         self._handle_marked_evt(
             event,
-            event_type
+            event_type,
         )
     }
 
@@ -1310,23 +1217,15 @@ impl JiraEmitter {
     fn _get_formatted_event(&self, event: JiraEvent, event_type: JiraEventTypes) -> String {
         format!(
             r#"[<i>{}</i> | <i>{}</i>] <a href="https://psychonaut.atlassian.net/people/{}">{}</a> {} {} <a href="https://psychonaut.atlassian.net/browse/{}">{}</a> [{}]: <b>{}</b>"#,
-
             event.issue.fields.priority.name.to_lowercase(),
-
             event.issue.fields.status.name.to_lowercase(),
-
             event.user.account_id,
             event.user.display_name,
-
             self._get_verb_from_type(event_type),
-
             event.issue.fields.issuetype.name.to_lowercase(),
-
             event.issue.key,
             event.issue.key,
-
             event.issue.fields.project.name,
-
             event.issue.fields.summary
         )
     }
@@ -1334,7 +1233,7 @@ impl JiraEmitter {
     fn _handle_marked_evt(&self, event: JiraEvent, event_type: JiraEventTypes) {
         self.configured_api.emit(
             self._get_formatted_event(event, event_type),
-            true
+            true,
         );
     }
 }
@@ -1377,7 +1276,7 @@ struct PayPalIPN {
 }
 
 struct PayPalEmitter {
-    configured_api: ConfiguredApi
+    configured_api: ConfiguredApi,
 }
 
 impl PayPalEmitter {
@@ -1392,7 +1291,7 @@ impl PayPalEmitter {
     fn handle_evt(&self, event: &PayPalIPN) {
         self.configured_api.emit(
             self._get_formatted_event(event),
-            true
+            true,
         );
     }
 
@@ -1419,7 +1318,7 @@ impl PayPalEmitter {
  */
 
 struct EoP {
-    thread_pool: scoped_threadpool::Pool
+    thread_pool: scoped_threadpool::Pool,
 }
 
 impl EoP {
@@ -1429,7 +1328,7 @@ impl EoP {
         }
     }
 
-    fn init (&mut self) {
+    fn init(&mut self) {
         self.thread_pool.scoped(|scoped| {
             scoped.execute(|| {
                 EoP::init_mediawiki();
@@ -1449,17 +1348,13 @@ impl EoP {
         });
     }
 
-    fn init_mediawiki () {
+    fn init_mediawiki() {
         let emitter = MediaWikiEmitter::new();
 
-        let socket = match UdpSocket::bind(MEDIAWIKI_ENDPOINT) {
-            Ok(socket) => {
-                println!("✔ MediaWikiEmitter online. ({})", MEDIAWIKI_ENDPOINT);
+        let socket = UdpSocket::bind(MEDIAWIKI_ENDPOINT)
+            .expect("✘ MediaWikiEmitter failed to create socket");
 
-                socket
-            },
-            Err(e) => panic!("✘ MediaWikiEmitter failed to create socket: {}", e)
-        };
+        println!("✔ MediaWikiEmitter online. ({})", MEDIAWIKI_ENDPOINT);
 
         let mut buf = [0; 2048];
         loop {
@@ -1467,22 +1362,16 @@ impl EoP {
                 Ok((amt, _)) => {
                     let instr = std::str::from_utf8(&buf[0..amt]).unwrap_or("");
 
-                    let evt = json::parse(instr);
-
-                    if !evt.is_ok() {
-                        continue;
+                    if let Ok(evt) = json::parse(instr) {
+                        emitter.handle_evt(&evt);
                     }
-
-                    let ref evt = evt.unwrap();
-
-                    emitter.handle_evt(evt);
-                },
-                Err(e) => println!("couldn't recieve a datagram: {}", e)
+                }
+                Err(e) => println!("couldn't receive a datagram: {}", e),
             }
         }
     }
 
-    fn init_github () {
+    fn init_github() {
         let mut hub = Hub::new();
 
         hub.handle("*", move |delivery: &Delivery| {
@@ -1494,14 +1383,14 @@ impl EoP {
                 println!("✔ GithubEmitter online. ({})", GITHUB_ENDPOINT);
 
                 server
-            },
+            }
             Err(e) => panic!("✘ GithubEmitter failed to create socket: {}", e)
         };
 
         let _ = srvc.handle(hub);
     }
 
-    fn init_jira () {
+    fn init_jira() {
         let server = rouille::Server::new(
             JIRA_ENDPOINT,
             move |request| {
@@ -1533,7 +1422,7 @@ impl EoP {
                         _ => rouille::Response::json(&r#"{"ok":false}"#)
                     )
                 })
-            }
+            },
         );
 
         match server {
@@ -1541,14 +1430,14 @@ impl EoP {
                 println!("✔ JiraEmitter online. ({})", JIRA_ENDPOINT);
 
                 server.run();
-            },
+            }
             Err(msg) => {
                 println!("✘ JiraEmitter failed to create socket: {:?}", msg);
             }
         }
     }
 
-    fn init_paypal () {
+    fn init_paypal() {
         let server = rouille::Server::new(
             PAYPAL_ENDPOINT,
             move |request| {
@@ -1579,7 +1468,7 @@ impl EoP {
                         _ => rouille::Response::json(&r#"{"ok":false}"#)
                     )
                 })
-            }
+            },
         );
 
         match server {
@@ -1587,7 +1476,7 @@ impl EoP {
                 println!("✔ PayPalEmitter online. ({})", JIRA_ENDPOINT);
 
                 server.run();
-            },
+            }
             Err(msg) => {
                 println!("✘ PayPalEmitter failed to create socket: {:?}", msg);
             }
