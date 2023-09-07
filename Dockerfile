@@ -1,4 +1,4 @@
-FROM psychonaut/rust-nightly:2019-06-09
+FROM rustlang/rust:nightly
 
 ADD . /my-source
 
